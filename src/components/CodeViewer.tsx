@@ -72,8 +72,15 @@ void loop() {
     while (LoRa.available()) {
       incoming += (char)LoRa.read();
     }
-    // Repassa a telemetria intacta para o PC
-    // Ex: "T:V=7.80,P=50,S=OK"
+
+    // Lê métricas de qualidade do rádio deste pacote recebido
+    int rssi = LoRa.packetRssi();    // Potência do sinal (dBm)
+    float snr = LoRa.packetSnr();    // Relação sinal-ruído (dB)
+
+    // Anexa RSSI e SNR à telemetria antes de enviar ao PC
+    // Ex: "T:V=7.80,P=50,S=OK,AR=-52" -> "T:V=7.80,P=50,S=OK,AR=-52,R=-45,N=9.5"
+    incoming += ",R=" + String(rssi) + ",N=" + String(snr, 1);
+
     Serial.println(incoming);
   }
 }
@@ -125,10 +132,14 @@ const float voltageDividerFactor = 2.0;
 const float referenceVoltage = 5.0; // Tensão de operação do Arduino (5V)
 
 int throttle = 0; // 0 a 100 (%)
+int lastCmdRssi = 0; // RSSI do último comando recebido do ESP32
 unsigned long lastTelemetryTime = 0;
 unsigned long lastVoltageReadTime = 0;
+unsigned long lastCommandTime = 0; // Failsafe: última vez que recebeu comando LoRa
+const unsigned long FAILSAFE_TIMEOUT = 2000; // 2 segundos sem comando = motor para
 float filteredVoltage = 0.0;
 bool firstRead = true;
+bool failsafeActive = false;
 
 void setup() {
   Serial.begin(115200); // Debug local (opcional)
@@ -153,6 +164,7 @@ void setup() {
   delay(2000);
 
   Serial.println("Arduino LoRa Remoto pronto. 2S Li-ion (Com Telemetria).");
+  lastCommandTime = millis(); // Inicializa o timer do failsafe
 }
 
 void loop() {
@@ -190,7 +202,24 @@ void loop() {
 
   // 3. Status de Segurança
   bool isBatteryLow = batteryVoltage < 6.0;
-  String status = isBatteryLow ? "ERROR_BATTERY" : "OK";
+
+  // === FAILSAFE: Desliga motor se perder conexão LoRa ===
+  if (throttle > 0 && (millis() - lastCommandTime > FAILSAFE_TIMEOUT)) {
+    throttle = 0;
+    esc.writeMicroseconds(1000);
+    failsafeActive = true;
+  } else if (millis() - lastCommandTime <= FAILSAFE_TIMEOUT) {
+    failsafeActive = false;
+  }
+
+  String status;
+  if (failsafeActive) {
+    status = "FAILSAFE";
+  } else if (isBatteryLow) {
+    status = "ERROR_BATTERY";
+  } else {
+    status = "OK";
+  }
 
   // 4. Envio de Telemetria via LoRa (a cada 500ms)
   if (millis() - lastTelemetryTime > 500) {
@@ -200,6 +229,8 @@ void loop() {
     telemetry += String(batteryPercent);
     telemetry += ",S=";
     telemetry += status;
+    telemetry += ",AR=";
+    telemetry += String(lastCmdRssi); // RSSI do sinal ESP32->Arduino
 
     LoRa.beginPacket();
     LoRa.print(telemetry);
@@ -219,6 +250,10 @@ void loop() {
       input += (char)LoRa.read();
     }
     input.trim();
+
+    // Guarda o RSSI do comando recebido (sinal ESP32 -> Arduino)
+    lastCmdRssi = LoRa.packetRssi();
+    lastCommandTime = millis(); // Reseta o timer do failsafe
 
     // Rotina de Calibração: Usada se o ESC não reconhecer a faixa do acelerador
     if (input == "CALIBRATE") {

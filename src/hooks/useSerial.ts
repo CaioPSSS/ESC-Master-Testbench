@@ -1,9 +1,20 @@
 import { useState, useRef, useCallback } from 'react';
 
+export interface TelemetryData {
+  v?: string;   // Voltage
+  p?: string;   // Battery percent
+  s?: string;   // Status (OK, ERROR_BATTERY, CALIBRATING, CAL_DONE)
+  r?: string;   // RSSI at ESP32 (signal from Arduino)
+  n?: string;   // SNR at ESP32
+  ar?: string;  // RSSI at Arduino (signal from ESP32)
+}
+
 export function useSerial() {
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [telemetry, setTelemetry] = useState<{ v?: string, p?: string, s?: string, err?: string } | null>(null);
+  const [telemetry, setTelemetry] = useState<TelemetryData | null>(null);
+  const [packetCount, setPacketCount] = useState(0);
+  const [lastPacketTime, setLastPacketTime] = useState<number | null>(null);
   
   const portRef = useRef<any>(null);
   const writerRef = useRef<any>(null);
@@ -32,7 +43,7 @@ export function useSerial() {
             for (const line of lines) {
               const cleanLine = line.trim();
               if (cleanLine.startsWith('T:')) {
-                // Ex: T:V=7.80,P=50,S=OK
+                // Ex: T:V=7.80,P=50,S=OK,R=-45,N=9.5,AR=-52
                 try {
                   const parts = cleanLine.substring(2).split(',');
                   const data: any = {};
@@ -41,6 +52,8 @@ export function useSerial() {
                     if (k && v) data[k.toLowerCase()] = v;
                   });
                   setTelemetry(data);
+                  setPacketCount(prev => prev + 1);
+                  setLastPacketTime(Date.now());
                 } catch(e) {}
               }
             }
@@ -79,6 +92,8 @@ export function useSerial() {
 
       setIsConnected(true);
       setError(null);
+      setPacketCount(0);
+      setLastPacketTime(null);
     } catch (err: any) {
       console.error('Erro de conexão Serial:', err);
       if (err.message.includes('No port selected')) {
@@ -112,6 +127,8 @@ export function useSerial() {
       readerRef.current = null;
       setIsConnected(false);
       setTelemetry(null);
+      setPacketCount(0);
+      setLastPacketTime(null);
     }
   };
 
@@ -126,5 +143,5 @@ export function useSerial() {
     }
   }, [isConnected]);
 
-  return { isConnected, connect, disconnect, send, error, telemetry };
+  return { isConnected, connect, disconnect, send, error, telemetry, packetCount, lastPacketTime };
 }

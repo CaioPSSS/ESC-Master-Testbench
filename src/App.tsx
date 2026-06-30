@@ -5,7 +5,7 @@ import { CodeViewer } from './components/CodeViewer';
 import { WiringGuide } from './components/WiringGuide';
 
 export default function App() {
-  const { isConnected, connect, disconnect, send, error, telemetry } = useSerial();
+  const { isConnected, connect, disconnect, send, error, telemetry, packetCount, lastPacketTime } = useSerial();
 
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col font-sans text-slate-300 overflow-hidden select-none">
@@ -61,7 +61,7 @@ export default function App() {
         
         {/* Left Panel: Controls & Telemetry */}
         <div className="lg:col-span-7 border-r border-slate-800 p-8 flex flex-col gap-8 overflow-y-auto">
-          <Dashboard isConnected={isConnected} send={send} telemetry={telemetry} />
+          <Dashboard isConnected={isConnected} send={send} telemetry={telemetry} packetCount={packetCount} lastPacketTime={lastPacketTime} />
           <WiringGuide />
         </div>
 
