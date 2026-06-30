@@ -1,0 +1,10 @@
+{
+  "name": "ESC Master Testbench",
+  "description": "App para controlar, testar e programar um ESC de motor brushless A2212 1000KV via Web Serial.",
+  "requestFramePermissions": [
+    "serial"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
