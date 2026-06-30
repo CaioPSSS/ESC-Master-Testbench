@@ -1,4 +1,5 @@
-import { Plug, Unplug, Settings2, Activity } from 'lucide-react';
+import { useState } from 'react';
+import { Plug, Unplug, Settings2, Activity, Code } from 'lucide-react';
 import { useSerial } from './hooks/useSerial';
 import { Dashboard } from './components/Dashboard';
 import { CodeViewer } from './components/CodeViewer';
@@ -6,6 +7,7 @@ import { WiringGuide } from './components/WiringGuide';
 
 export default function App() {
   const { isConnected, connect, disconnect, send, error, telemetry, packetCount, lastPacketTime } = useSerial();
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col font-sans text-slate-300 overflow-hidden select-none">
@@ -35,7 +37,7 @@ export default function App() {
             {!isConnected ? (
               <button
                 onClick={connect}
-                className="flex items-center gap-1.5 hover:text-emerald-400 transition-colors"
+                className="flex items-center gap-1.5 hover:text-emerald-400 transition-colors cursor-pointer"
               >
                 <Plug className="w-4 h-4" />
                 CONNECT
@@ -43,7 +45,7 @@ export default function App() {
             ) : (
               <button
                 onClick={disconnect}
-                className="flex items-center gap-1.5 hover:text-rose-400 transition-colors"
+                className="flex items-center gap-1.5 hover:text-rose-400 transition-colors cursor-pointer"
               >
                 <Unplug className="w-4 h-4" />
                 DISCONNECT
@@ -52,21 +54,36 @@ export default function App() {
             <div>
               DEVICE: <span className="text-slate-300 font-mono">ESP32_LORA_BRIDGE</span>
             </div>
+
+            <button
+              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded transition-all text-[10px] font-bold uppercase tracking-wider cursor-pointer border ${
+                isSidebarOpen
+                  ? 'bg-amber-500/15 border-amber-500/40 text-amber-400 shadow-[0_0_8px_rgba(245,158,11,0.15)]'
+                  : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200 hover:bg-slate-750'
+              }`}
+            >
+              <Code className="w-3.5 h-3.5" />
+              {isSidebarOpen ? 'Esconder Código' : 'Mostrar Código'}
+            </button>
           </div>
         </div>
       </header>
 
       {/* Main Control Dashboard */}
-      <main className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-0 overflow-hidden">
+      <main className="flex-1 flex overflow-hidden relative">
         
         {/* Left Panel: Controls & Telemetry */}
-        <div className="lg:col-span-7 border-r border-slate-800 p-8 flex flex-col gap-8 overflow-y-auto">
+        <div className="flex-1 border-r border-slate-800 p-5 flex flex-col gap-5 overflow-y-auto min-w-[320px]">
           <Dashboard isConnected={isConnected} send={send} telemetry={telemetry} packetCount={packetCount} lastPacketTime={lastPacketTime} />
           <WiringGuide />
         </div>
 
-        {/* Right Panel: Logic & Documentation */}
-        <div className="lg:col-span-5 bg-slate-900/30 p-8 flex flex-col overflow-y-auto">
+        {/* Right Panel: Logic & Documentation (Retrátil) */}
+        <div 
+          className={`shrink-0 bg-slate-900/30 flex flex-col overflow-y-auto transition-all duration-300 ease-in-out border-l border-slate-800
+            ${isSidebarOpen ? 'w-[460px] p-6 opacity-100' : 'w-0 p-0 border-l-0 opacity-0 pointer-events-none'}`}
+        >
           <CodeViewer />
         </div>
         

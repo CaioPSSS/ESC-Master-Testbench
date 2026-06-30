@@ -98,26 +98,32 @@ The system has **two independent failsafe layers** to stop the motor if the LoRa
 | VCC      | 3.3V       |
 
 ### 8. UI Guidelines
-- **Dashboard** (`src/components/Dashboard.tsx`): Custom-styled throttle slider. The slider thumb positioning logic uses `calc(0.5rem + (100% - 1rem) * ${throttle / 100})`.
+- **Layout Architecture (`src/App.tsx`)**: The main area is a flex layout (`flex flex-row relative overflow-hidden h-full w-full`). The right side hosts a **microcontroller code drawer** that slides in and out smoothly (`transition-all duration-300`). When closed, it collapses completely (`w-0 opacity-0`), prompting the left panel (Dashboard + WiringGuide) to expand and occupy **100% of the screen width**.
+- **Sidebar Toggle**: Toggleable via the "Mostrar/Esconder Código" button in the top header, which imports the `Code` icon from `lucide-react`.
+- **Dashboard** (`src/components/Dashboard.tsx`): Custom-styled throttle slider. The track has a thick `h-12` container and the slider thumb uses a prominent `w-10 h-10` circle with absolute positioning `calc(0.5rem + (100% - 1rem) * ${throttle / 100})`. Card items and grids use expanded paddings (`p-6` on slider card, `p-4` on telemetry cards, `p-3.5` on diagnostics) and gaps (`gap-4`) with spacing (`space-y-6`) to achieve a premium, breathing layout.
+- **Glassmorphism & Glow**: All cards use a glass-like `bg-slate-900/40 backdrop-blur-md border border-slate-800/80` style. The throttle text percentage and progress bar have dynamic shadows (`box-shadow`, `text-shadow`) that grow in intensity and shift from amber to red based on the current `throttle` value.
+- **Animations (`src/index.css`)**:
+  - `animate-ping-slow`: A custom sonar-like slow pulse animation on the "LIVE" status indicator when connection is active.
+  - `animate-alert-rose` and `animate-alert-amber`: Soft, breathing neon borders that pulse around the slider card in red (low battery) or orange (failsafe connection loss) states.
 - **Auto-disarm**: Dashboard auto-disarms and zeroes throttle if telemetry reports `S=ERROR_BATTERY`, `S=FAILSAFE`, or if telemetry goes stale for 3+ seconds.
 - **ARM/DISARM flow**: Motor must be armed via button before slider activates. Emergency Stop button disarms immediately.
-- **LoRa Link Diagnostics** (in Dashboard): A dedicated section showing bidirectional RSSI (Arduino→ESP32 and ESP32→Arduino), SNR, link quality %, packet count, last-seen timing, and a live/stale pulse indicator. Signal bars use dynamic color coding (green/amber/red).
+- **LoRa Link Diagnostics** (in Dashboard): A consolidated 4-column compact grid showing bidirectional RSSI (Bridge & Remote), SNR, Link Quality (%), and Packet count/frequency. Signal strength bars (5 levels) are displayed directly in the section header.
 - **MCU Status States**: `OFFLINE` (slate) → `FAILSAFE` (amber) → `CORTE ATIVO` (rose) → `SEM SINAL` (amber) → `NORMAL` (emerald) → `NO TELEMETRY` (blue).
-- **CodeViewer** (`src/components/CodeViewer.tsx`): Shows two tabs -- "Transmissor (ESP32 Bridge)" and "Receptor (Arduino Remoto)" -- each with collapsible view and copy button. Section is collapsible by default.
-- **WiringGuide** (`src/components/WiringGuide.tsx`): Collapsible section in the left panel with hardware specs, LoRa SPI pinout tables, and 8 wiring/safety instructions.
+- **CodeViewer** (`src/components/CodeViewer.tsx`): Shows two tabs -- "Transmissor (ESP32 Bridge)" and "Receptor (Arduino Remoto)" -- and a wiring block diagram. Code is always visible and copyable when the sidebar is open.
+- **WiringGuide** (`src/components/WiringGuide.tsx`): A glassmorphic card styled similarly to the Dashboard, stacked directly underneath it in the left panel. It does not have `mt-auto`, aligning naturally below the telemetry panels with a standard gap.
 
 ## File Structure
 ```
 src/
-+-- App.tsx                    # Root layout: header, sidebar split, footer
++-- App.tsx                    # Root layout: header, sidebar toggle state, flex container, footer
 +-- main.tsx                   # React entry point
-+-- index.css                  # Global styles (Tailwind base)
++-- index.css                  # Global styles & keyframe animations (Tailwind base)
 +-- hooks/
 |   +-- useSerial.ts           # Web Serial hook: connect/disconnect/send/readLoop/telemetry
 +-- components/
-    +-- Dashboard.tsx           # Throttle slider + telemetry cards + LoRa link diagnostics + arm/disarm buttons
-    +-- CodeViewer.tsx          # Arduino & ESP32 code display (tabbed, collapsible, copyable)
-    +-- WiringGuide.tsx         # Hardware specs + LoRa pinout tables + wiring instructions
+    +-- Dashboard.tsx           # Throttle slider + telemetry + LoRa diagnostics grid + glow & border animations
+    +-- CodeViewer.tsx          # Arduino & ESP32 code display (always expanded inside sidebar)
+    +-- WiringGuide.tsx         # Hardware specs + LoRa pinout tables + wiring instructions (styled as card)
 ```
 
 ## Future Agents Rules
@@ -127,6 +133,7 @@ src/
 - **Do NOT** change the dead zone compensation value `1040us` unless explicitly requested.
 - **Do NOT** change the failsafe timeout values (`FAILSAFE_TIMEOUT = 2000ms` on Arduino, `3000ms` on Dashboard) unless explicitly requested. These are safety-critical and were designed as a dual-layer protection system.
 - **Do NOT** remove or weaken the failsafe auto-disarm logic in `Dashboard.tsx` or the watchdog in the Arduino code (`CodeViewer.tsx`). The motor MUST stop if LoRa connection is lost.
+- **Do NOT** re-introduce `mt-auto` or top borders on the `WiringGuide.tsx` which could detach it from the Dashboard block or disrupt the spacing layout.
 - Always maintain the dark slate/cyberpunk aesthetic (Tailwind `slate`, `emerald`, `amber`, `rose`, `cyan`).
 - Keep hardware instructions strictly to 2S Li-ion (7.4V nominal, 8.4V max, 6.0V cutoff).
 - This project uses **TailwindCSS v4** via the Vite plugin. Do NOT use v3 syntax (`tailwind.config.js`, `@apply`, `theme()` in config, etc.).

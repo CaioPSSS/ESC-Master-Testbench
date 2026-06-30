@@ -5,9 +5,9 @@ export function WiringGuide() {
   const [isExpanded, setIsExpanded] = useState(false);
 
   return (
-    <div className="mt-auto space-y-4">
+    <div className="bg-slate-900/40 backdrop-blur-md rounded-xl p-5 border border-slate-800/80 transition-all duration-300 space-y-4">
       <div 
-        className="flex justify-between items-center cursor-pointer border-t border-slate-800 pt-6" 
+        className="flex justify-between items-center cursor-pointer" 
         onClick={() => setIsExpanded(!isExpanded)}
       >
         <div>
