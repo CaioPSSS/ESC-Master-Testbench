@@ -1,12 +1,12 @@
 import { useState } from 'react';
-import { Plug, Unplug, Settings2, Activity, Code } from 'lucide-react';
-import { useSerial } from './hooks/useSerial';
+import { Bluetooth, BluetoothOff, Settings2, Activity, Code } from 'lucide-react';
+import { useBluetooth } from './hooks/useBluetooth';
 import { Dashboard } from './components/Dashboard';
 import { CodeViewer } from './components/CodeViewer';
 import { WiringGuide } from './components/WiringGuide';
 
 export default function App() {
-  const { isConnected, connect, disconnect, send, error, telemetry, packetCount, lastPacketTime } = useSerial();
+  const { isConnected, connect, disconnect, send, error, telemetry, packetCount, lastPacketTime } = useBluetooth();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   return (
@@ -15,8 +15,8 @@ export default function App() {
       {/* Top Navigation / Status Bar */}
       <header className="h-16 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-8 shrink-0">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-amber-500 rounded flex items-center justify-center text-slate-950 font-bold">M</div>
-          <h1 className="text-xl font-semibold tracking-tight text-white">ESC Pro Controller <span className="text-slate-500 font-normal text-sm ml-2">v3.0.0</span></h1>
+          <div className="w-8 h-8 bg-blue-500 rounded flex items-center justify-center text-slate-950 font-bold">M</div>
+          <h1 className="text-xl font-semibold tracking-tight text-white">ESC Pro Controller <span className="text-slate-500 font-normal text-sm ml-2">v5.0.0 BLE</span></h1>
         </div>
         
         <div className="flex items-center gap-6">
@@ -27,9 +27,13 @@ export default function App() {
           )}
           
           <div className="flex items-center gap-2">
-            <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-500' : 'bg-rose-500'}`}></span>
-            <span className={`text-xs uppercase tracking-widest font-bold ${isConnected ? 'text-emerald-500' : 'text-rose-500'}`}>
-              {isConnected ? 'MCU CONNECTED' : 'DISCONNECTED'}
+            {isConnected ? (
+              <Bluetooth className="w-4 h-4 text-blue-400" />
+            ) : (
+              <BluetoothOff className="w-4 h-4 text-slate-500" />
+            )}
+            <span className={`text-xs uppercase tracking-widest font-bold ${isConnected ? 'text-blue-400' : 'text-slate-500'}`}>
+              {isConnected ? 'BLE CONNECTED' : 'DISCONNECTED'}
             </span>
           </div>
 
@@ -37,22 +41,22 @@ export default function App() {
             {!isConnected ? (
               <button
                 onClick={connect}
-                className="flex items-center gap-1.5 hover:text-emerald-400 transition-colors cursor-pointer"
+                className="flex items-center gap-1.5 bg-blue-600/20 text-blue-400 border border-blue-500/30 px-3 py-1.5 rounded hover:bg-blue-600/30 hover:text-blue-300 transition-colors cursor-pointer font-bold tracking-wider"
               >
-                <Plug className="w-4 h-4" />
-                CONNECT
+                <Bluetooth className="w-4 h-4" />
+                CONECTAR BLUETOOTH
               </button>
             ) : (
               <button
                 onClick={disconnect}
-                className="flex items-center gap-1.5 hover:text-rose-400 transition-colors cursor-pointer"
+                className="flex items-center gap-1.5 bg-slate-800 text-slate-400 border border-slate-700 px-3 py-1.5 rounded hover:bg-slate-700 hover:text-rose-400 transition-colors cursor-pointer font-bold tracking-wider"
               >
-                <Unplug className="w-4 h-4" />
-                DISCONNECT
+                <BluetoothOff className="w-4 h-4" />
+                DESCONECTAR
               </button>
             )}
             <div>
-              DEVICE: <span className="text-slate-300 font-mono">ESP32_LORA_BRIDGE</span>
+              BRIDGE: <span className="text-slate-300 font-mono">ESP32_BLE_LORA</span>
             </div>
 
             <button
@@ -92,10 +96,10 @@ export default function App() {
       {/* Footer Info Bar */}
       <footer className="h-10 bg-slate-900 border-t border-slate-800 px-8 flex items-center justify-between shrink-0">
         <div className="text-[10px] text-slate-500 font-medium">
-          LOG: [{new Date().toLocaleTimeString()}] {isConnected ? 'SYSTEM READY' : 'WAITING FOR CONNECTION'}
+          LOG: [{new Date().toLocaleTimeString()}] {isConnected ? 'BLE BRIDGE READY' : 'WAITING FOR BLUETOOTH PAIRING'}
         </div>
         <div className="text-[10px] text-slate-600">
-          SISTEMA DE TESTE DE BANCADA • AEROMODELISMO DIY
+          SISTEMA DE TESTE DE BANCADA • BLE + LORA • AEROMODELISMO DIY
         </div>
       </footer>
     </div>

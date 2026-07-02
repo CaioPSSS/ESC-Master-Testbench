@@ -1,7 +1,7 @@
 # Project Context & Agent Instructions
 
 ## Overview
-This is a **React + TypeScript + Vite** web application that acts as a wireless control dashboard for a brushless motor (A2212 1000KV). It uses a **LoRa 433MHz** wireless architecture: the PC connects via **Web Serial (USB)** to an **ESP32 Bridge**, which relays commands wirelessly to a remote **Arduino Uno** that drives the ESC and sends battery telemetry back.
+This is a **React + TypeScript + Vite** web application that acts as a wireless control dashboard for a brushless motor (A2212 1000KV). It uses a **WiFi + LoRa 433MHz** wireless architecture: the ESP32 creates a WiFi Access Point and serves the dashboard via SPIFFS. Any phone or PC connects to the ESP32's WiFi, opens the dashboard in a browser, and communicates via **WebSocket**. The ESP32 relays commands wirelessly via **LoRa** to a remote **Arduino Uno** that drives the ESC and sends battery telemetry back.
 
 ## Tech Stack
 - **Framework**: React 19 + TypeScript 5.8
@@ -13,17 +13,20 @@ This is a **React + TypeScript + Vite** web application that acts as a wireless 
 ## Hardware Architecture
 
 ```
-[PC / Browser]
-     |  Web Serial USB (115200 baud)
+[Phone / PC / Any Browser]
+     |  WiFi (SSID: ESC-TestBench, Pass: motor2025)
+     |  WebSocket ws://192.168.4.1/ws
      v
-[ESP32 DevKit V1]  <->  [LoRa SX1278 Ra-02 433MHz]  ~~wireless~~
-                                                              |
-                                               [LoRa SX1278 Ra-02 433MHz]  <->  [Arduino Uno]
-                                                                                      |
-                                                                              [ESC <- PWM Pin 6]
-                                                                              [Battery A0 (Voltage Divider 1:1)]
-                                                                              [Motor A2212 1000KV]
-                                                                              [2S 18650 Li-ion Pack]
+[ESP32 DevKit V1]  <- WiFi AP + Web Server (SPIFFS) + WebSocket Server
+     |                 LoRa SX1278 Ra-02 433MHz
+     |                 ~~~ 433MHz wireless ~~~
+     v
+[Arduino Uno]  <->  [LoRa SX1278 Ra-02 433MHz]
+     |
+     +-- [ESC <- PWM Pin 6]
+     +-- [Battery A0 (Voltage Divider 1:1)]
+     +-- [Motor A2212 1000KV]
+     +-- [2S 18650 Li-ion Pack]
 ```
 
 ## Key Components and Logic
@@ -44,15 +47,17 @@ This is a **React + TypeScript + Vite** web application that acts as a wireless 
 - **Battery specs**: 2S Li-ion 18650 -- 7.4V nominal, 8.4V max, 6.0V software cutoff (~3.0V/cell).
 - Battery percentage mapped via: `map(batteryVoltage * 100, 600, 840, 0, 100)`.
 
-### 3. Web Serial Protocol
-- **Outbound (Web -> ESP32 via USB Serial)**: Raw throttle number followed by newline, e.g., `45\n`. Special command: `CALIBRATE\n`.
-- **Inbound (Arduino -> ESP32 via LoRa -> Web)**: Prefixed key-value format. The Arduino sends base telemetry via LoRa, and the ESP32 appends radio metrics before forwarding to the PC via USB Serial.
+### 3. WebSocket Protocol
+- **Outbound (Browser -> ESP32 via WebSocket)**: Raw throttle number followed by newline, e.g., `45\n`. Special command: `CALIBRATE\n`.
+- **Inbound (Arduino -> ESP32 via LoRa -> Browser via WebSocket)**: Prefixed key-value format. The Arduino sends base telemetry via LoRa, and the ESP32 appends radio metrics before broadcasting to all WebSocket clients.
   - **Full format**: `T:V=7.80,P=50,S=OK,AR=-52,R=-45,N=9.5`
   - **Arduino fields**: `V` (voltage), `P` (battery %), `S` (status: `OK`, `ERROR_BATTERY`, `FAILSAFE`, `CALIBRATING`, `CAL_DONE`), `AR` (RSSI of last command received from ESP32, in dBm)
   - **ESP32-appended fields**: `R` (RSSI of received LoRa packet, in dBm), `N` (SNR of received packet, in dB)
-  - Parsed in `src/hooks/useSerial.ts`. Keys are converted to lowercase (`v`, `p`, `s`, `r`, `n`, `ar`).
+  - Parsed in `src/hooks/useWebSocket.ts`. Keys are converted to lowercase (`v`, `p`, `s`, `r`, `n`, `ar`).
 - Telemetry is sent every 500ms from the Arduino via LoRa.
-- The `useSerial` hook also tracks `packetCount` (incremental counter) and `lastPacketTime` (timestamp of last received telemetry).
+- The `useWebSocket` hook auto-connects on mount, auto-reconnects on disconnect (3s interval), and tracks `packetCount` (incremental counter) and `lastPacketTime` (timestamp of last received telemetry).
+- **WiFi AP Config**: SSID `ESC-TestBench`, password `motor2025`, IP `192.168.4.1`.
+- **ESP32 Libraries**: WiFi.h, SPIFFS.h, ESPAsyncWebServer (me-no-dev), AsyncTCP, LoRa.h (Sandeep Mistry).
 
 ### 4. Failsafe System (Dual-Layer)
 The system has **two independent failsafe layers** to stop the motor if the LoRa connection is lost:
@@ -109,7 +114,7 @@ The system has **two independent failsafe layers** to stop the motor if the LoRa
 - **ARM/DISARM flow**: Motor must be armed via button before slider activates. Emergency Stop button disarms immediately.
 - **LoRa Link Diagnostics** (in Dashboard): A consolidated 4-column compact grid showing bidirectional RSSI (Bridge & Remote), SNR, Link Quality (%), and Packet count/frequency. Signal strength bars (5 levels) are displayed directly in the section header.
 - **MCU Status States**: `OFFLINE` (slate) → `FAILSAFE` (amber) → `CORTE ATIVO` (rose) → `SEM SINAL` (amber) → `NORMAL` (emerald) → `NO TELEMETRY` (blue).
-- **CodeViewer** (`src/components/CodeViewer.tsx`): Shows two tabs -- "Transmissor (ESP32 Bridge)" and "Receptor (Arduino Remoto)" -- and a wiring block diagram. Code is always visible and copyable when the sidebar is open.
+- **CodeViewer** (`src/components/CodeViewer.tsx`): Shows two tabs -- "Bridge WiFi (ESP32)" and "Receptor (Arduino Remoto)" -- and a wiring block diagram. Code is always visible and copyable when the sidebar is open.
 - **WiringGuide** (`src/components/WiringGuide.tsx`): A glassmorphic card styled similarly to the Dashboard, stacked directly underneath it in the left panel. It does not have `mt-auto`, aligning naturally below the telemetry panels with a standard gap.
 
 ## File Structure
@@ -119,16 +124,20 @@ src/
 +-- main.tsx                   # React entry point
 +-- index.css                  # Global styles & keyframe animations (Tailwind base)
 +-- hooks/
-|   +-- useSerial.ts           # Web Serial hook: connect/disconnect/send/readLoop/telemetry
+|   +-- useWebSocket.ts        # WebSocket hook: auto-connect/reconnect/send/telemetry (replaces useSerial)
 +-- components/
     +-- Dashboard.tsx           # Throttle slider + telemetry + LoRa diagnostics grid + glow & border animations
     +-- CodeViewer.tsx          # Arduino & ESP32 code display (always expanded inside sidebar)
-    +-- WiringGuide.tsx         # Hardware specs + LoRa pinout tables + wiring instructions (styled as card)
+    +-- WiringGuide.tsx         # Hardware specs + WiFi + LoRa pinout tables + wiring instructions (styled as card)
+
+esp32_lora_bridge/
++-- esp32_lora_bridge.ino      # ESP32 firmware: WiFi AP + SPIFFS Web Server + WebSocket + LoRa bridge
++-- data/                      # SPIFFS upload directory (built dashboard files go here via npm run build:esp32)
 ```
 
 ## Future Agents Rules
 - **Do NOT** change the `alpha` values (`0.05` / `0.0002`) or the anti-sag filter structure in `CodeViewer.tsx` unless explicitly requested, as this was iteratively tuned to solve specific physical hardware behaviors.
-- **Do NOT** remove the Web Serial error handling in `useSerial.ts` that catches `NetworkError` and "lost" devices.
+- **Do NOT** remove the WebSocket auto-reconnect logic in `useWebSocket.ts` — it ensures the dashboard recovers from transient WiFi disconnects.
 - **Do NOT** change the ESC PWM pin from **D6** back to D9 -- D9 is occupied by the LoRa NRESET line.
 - **Do NOT** change the dead zone compensation value `1040us` unless explicitly requested.
 - **Do NOT** change the failsafe timeout values (`FAILSAFE_TIMEOUT = 2000ms` on Arduino, `3000ms` on Dashboard) unless explicitly requested. These are safety-critical and were designed as a dual-layer protection system.

@@ -1,10 +1,13 @@
 import { Copy, Check, ChevronDown, ChevronUp, Radio, Cpu } from 'lucide-react';
 import { useState } from 'react';
 
-const ESP32_BRIDGE_CODE = `
-/*
- * ESC Master Testbench — Transmissor / Bridge (ESP32)
- * Faz a ponte entre o Dashboard (Web Serial USB) e o Arduino remoto (LoRa)
+const ESP32_BRIDGE_CODE = `\n/*
+ * ESC Master Testbench — Bridge BLE + LoRa (ESP32)
+ * O ESP32 atua como um servidor Bluetooth Low Energy (BLE)
+ * usando o protocolo padrão UART.
+ * Comandos recebidos via BLE são retransmitidos via LoRa
+ * para o Arduino remoto, e a telemetria LoRa recebida é
+ * enviada de volta por BLE Notify.
  *
  * Módulo LoRa: SX1278 Ra-02 433MHz
  * Biblioteca: LoRa.h (Sandeep Mistry)
@@ -15,79 +18,190 @@ const ESP32_BRIDGE_CODE = `
  *   SCK  = GPIO 18   (default VSPI)
  *   MISO = GPIO 19   (default VSPI)
  *   MOSI = GPIO 23   (default VSPI)
- *
- * O ESP32 recebe comandos via Serial USB (ex: "45\\n")
- * e os repassa via LoRa para o Arduino remoto.
- * Também recebe telemetria LoRa do Arduino e a imprime
- * no Serial para o Dashboard React ler via Web Serial.
  */
 
 #include <SPI.h>
 #include <LoRa.h>
+#include <BLEDevice.h>
+#include <BLEServer.h>
+#include <BLEUtils.h>
+#include <BLE2902.h>
 
-// Pinos SPI do LoRa no ESP32 (VSPI)
+// ========================
+// Pinos SPI do LoRa (VSPI)
+// ========================
 #define LORA_NSS   5
 #define LORA_RST   14
 #define LORA_DIO0  2
 
-#define LORA_FREQ  433E6  // 433 MHz (ajuste para sua região)
+#define LORA_FREQ  433E6  // 433 MHz
+
+bool hasLoRa = false;
+
+// ========================
+// Configuração BLE UART
+// ========================
+BLEServer *pServer = NULL;
+BLECharacteristic *pTxCharacteristic = NULL;
+bool deviceConnected = false;
+bool oldDeviceConnected = false;
+
+// UUIDs padrão Nordic UART
+#define SERVICE_UUID           "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"
+#define CHARACTERISTIC_UUID_RX "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"
+#define CHARACTERISTIC_UUID_TX "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"
+
+class MyServerCallbacks: public BLEServerCallbacks {
+    void onConnect(BLEServer* pServer) {
+      deviceConnected = true;
+      Serial.println("[BLE] Dispositivo conectado!");
+    };
+    void onDisconnect(BLEServer* pServer) {
+      deviceConnected = false;
+      Serial.println("[BLE] Dispositivo desconectado!");
+    }
+};
+
+// Globais para thread-safety (Comunicação entre Task BLE e Task Loop)
+portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
+String pendingCommand = "";
+bool hasPendingCommand = false;
+
+class MyCallbacks: public BLECharacteristicCallbacks {
+    void onWrite(BLECharacteristic *pCharacteristic) {
+      std::string rxValue = pCharacteristic->getValue();
+
+      if (rxValue.length() > 0) {
+        String cmd = rxValue.c_str();
+        cmd.trim();
+        
+        if (cmd.length() > 0 && hasLoRa) {
+          portENTER_CRITICAL(&mux);
+          pendingCommand = cmd;
+          hasPendingCommand = true;
+          portEXIT_CRITICAL(&mux);
+        }
+      }
+    }
+};
 
 void setup() {
   Serial.begin(115200);
-  while (!Serial);
+  delay(500);
 
-  // Configura pinos do LoRa
+  // 1. Inicializa LoRa
   LoRa.setPins(LORA_NSS, LORA_RST, LORA_DIO0);
-
   if (!LoRa.begin(LORA_FREQ)) {
-    Serial.println("ERRO: Falha ao inicializar LoRa!");
-    while (1);
+    Serial.println("ERRO: Falha LoRa! Verifique as conexões SPI.");
+    hasLoRa = false;
+  } else {
+    LoRa.setTxPower(17);
+    LoRa.setSpreadingFactor(7);
+    LoRa.setSignalBandwidth(250E3);
+    LoRa.setCodingRate4(5);
+    Serial.println("[OK] LoRa inicializado.");
+    hasLoRa = true;
   }
 
-  // Configurações do rádio
-  LoRa.setTxPower(17);           // 17 dBm
-  LoRa.setSpreadingFactor(7);    // SF7 — menor latência
-  LoRa.setSignalBandwidth(250E3); // 250kHz — bom throughput
-  LoRa.setCodingRate4(5);         // 4/5
+  // 2. Inicialização BLE
+  BLEDevice::init("ESC-TestBench-BLE");
+  
+  // Opcional: Aumenta a potência do BLE para +9dBm (máximo do ESP32)
+  BLEDevice::setPower(ESP_PWR_LVL_P9);
 
-  Serial.println("ESP32 LoRa Bridge pronto.");
+  pServer = BLEDevice::createServer();
+  pServer->setCallbacks(new MyServerCallbacks());
+
+  BLEService *pService = pServer->createService(SERVICE_UUID);
+
+  pTxCharacteristic = pService->createCharacteristic(
+                        CHARACTERISTIC_UUID_TX,
+                        BLECharacteristic::PROPERTY_NOTIFY
+                      );
+                      
+  pTxCharacteristic->addDescriptor(new BLE2902());
+
+  BLECharacteristic *pRxCharacteristic = pService->createCharacteristic(
+                        CHARACTERISTIC_UUID_RX,
+                        BLECharacteristic::PROPERTY_WRITE |
+                        BLECharacteristic::PROPERTY_WRITE_NR
+                      );
+
+  pRxCharacteristic->setCallbacks(new MyCallbacks());
+
+  pService->start();
+
+  pServer->getAdvertising()->addServiceUUID(SERVICE_UUID);
+  pServer->getAdvertising()->start();
+  
+  Serial.println("[BLE] Aguardando conexão do Dashboard (ESC-TestBench-BLE)...");
 }
 
 void loop() {
-  // === 1. PC -> ESP32 (Serial USB) -> LoRa (para o Arduino) ===
-  if (Serial.available() > 0) {
-    String cmd = Serial.readStringUntil('\\n');
-    cmd.trim();
-    if (cmd.length() > 0) {
+  static unsigned long lastTxTime = 0;
+
+  // Trata envio de comandos pendentes (Thread-safe)
+  bool sendCmd = false;
+  String cmdToSend = "";
+  
+  portENTER_CRITICAL(&mux);
+  if (hasPendingCommand) {
+    sendCmd = true;
+    cmdToSend = pendingCommand;
+    hasPendingCommand = false;
+  }
+  portEXIT_CRITICAL(&mux);
+
+  if (sendCmd && hasLoRa) {
+    unsigned long now = millis();
+    if (now - lastTxTime > 40) {
       LoRa.beginPacket();
-      LoRa.print(cmd);
+      LoRa.print(cmdToSend);
       LoRa.endPacket();
+      LoRa.receive(); // Retorna explicitamente ao modo de recepção contínua
+      lastTxTime = now;
     }
   }
 
-  // === 2. LoRa (do Arduino) -> ESP32 -> PC (Serial USB) ===
-  int packetSize = LoRa.parsePacket();
-  if (packetSize) {
-    String incoming = "";
-    while (LoRa.available()) {
-      incoming += (char)LoRa.read();
+  // 3. LoRa (Arduino) -> BLE (Dashboard)
+  if (hasLoRa) {
+    int packetSize = LoRa.parsePacket();
+    if (packetSize) {
+      String incoming = "";
+      while (LoRa.available()) {
+        incoming += (char)LoRa.read();
+      }
+      
+      int rssi = LoRa.packetRssi();
+      float snr = LoRa.packetSnr();
+      // Ex: "T:V=7.80,P=50,S=OK,AR=-52" -> "T:V=7.80,P=50,S=OK,AR=-52,R=-45,N=9.5"
+      incoming += ",R=" + String(rssi) + ",N=" + String(snr, 1);
+      
+      // Envia via BLE se o dashboard estiver pareado
+      if (deviceConnected) {
+        pTxCharacteristic->setValue(incoming.c_str());
+        pTxCharacteristic->notify();
+      }
+      
+      Serial.println(incoming);
     }
+  }
 
-    // Lê métricas de qualidade do rádio deste pacote recebido
-    int rssi = LoRa.packetRssi();    // Potência do sinal (dBm)
-    float snr = LoRa.packetSnr();    // Relação sinal-ruído (dB)
-
-    // Anexa RSSI e SNR à telemetria antes de enviar ao PC
-    // Ex: "T:V=7.80,P=50,S=OK,AR=-52" -> "T:V=7.80,P=50,S=OK,AR=-52,R=-45,N=9.5"
-    incoming += ",R=" + String(rssi) + ",N=" + String(snr, 1);
-
-    Serial.println(incoming);
+  // 4. Trata reconexão BLE
+  if (!deviceConnected && oldDeviceConnected) {
+      delay(500); // dá um tempo para a stack BLE processar
+      pServer->startAdvertising(); // Reinicia a publicação do nome para reconectar
+      Serial.println("[BLE] Reiniciando publicidade...");
+      oldDeviceConnected = deviceConnected;
+  }
+  
+  if (deviceConnected && !oldDeviceConnected) {
+      oldDeviceConnected = deviceConnected;
   }
 }
-`.trim();
+\n`.trim();
 
-const ARDUINO_REMOTE_CODE = `
-/*
+const ARDUINO_REMOTE_CODE = `\n/*
  * ESC Master Testbench — Receptor Remoto (Arduino Uno)
  * Recebe comandos de throttle via LoRa e controla o ESC
  * Envia telemetria da bateria 2S de volta via LoRa
@@ -123,7 +237,11 @@ const ARDUINO_REMOTE_CODE = `
 #define LORA_FREQ  433E6  // 433 MHz (deve ser igual ao ESP32)
 
 Servo esc;
+Servo leftElevon;
+Servo rightElevon;
 const int escPin = 6;      // Pino PWM (mudou de D9 para D6 por causa do LoRa)
+const int leftElevonPin = 3;
+const int rightElevonPin = 5;
 const int voltagePin = A0;
 
 // Configuração do Divisor de Tensão
@@ -131,7 +249,13 @@ const int voltagePin = A0;
 const float voltageDividerFactor = 2.0;
 const float referenceVoltage = 5.0; // Tensão de operação do Arduino (5V)
 
+// Fator de calibração: compensa tolerância dos resistores e referência real do Arduino.
+// Calcule: tensão_multímetro / tensão_dashboard (ex: 7.28 / 6.38 = 1.141)
+const float VOLTAGE_CALIBRATION = 1.141;
+
 int throttle = 0; // 0 a 100 (%)
+int pitch = 0;    // -100 a 100
+int roll = 0;     // -100 a 100
 int lastCmdRssi = 0; // RSSI do último comando recebido do ESP32
 unsigned long lastTelemetryTime = 0;
 unsigned long lastVoltageReadTime = 0;
@@ -156,11 +280,15 @@ void setup() {
   LoRa.setSignalBandwidth(250E3);
   LoRa.setCodingRate4(5);
 
-  // Inicializa ESC
+  // Inicializa ESC e Servos
   esc.attach(escPin, 1000, 2000);
+  leftElevon.attach(leftElevonPin);
+  rightElevon.attach(rightElevonPin);
 
-  // Arming do ESC (1000us)
+  // Arming do ESC (1000us) e centraliza servos (90)
   esc.writeMicroseconds(1000);
+  leftElevon.write(90);
+  rightElevon.write(90);
   delay(2000);
 
   Serial.println("Arduino LoRa Remoto pronto. 2S Li-ion (Com Telemetria).");
@@ -172,7 +300,7 @@ void loop() {
   if (millis() - lastVoltageReadTime >= 20) {
     int sensorValue = analogRead(voltagePin);
     float pinVoltage = (sensorValue / 1023.0) * referenceVoltage;
-    float currentVoltage = pinVoltage * voltageDividerFactor;
+    float currentVoltage = pinVoltage * voltageDividerFactor * VOLTAGE_CALIBRATION;
 
     if (firstRead) {
       filteredVoltage = currentVoltage;
@@ -204,9 +332,13 @@ void loop() {
   bool isBatteryLow = batteryVoltage < 6.0;
 
   // === FAILSAFE: Desliga motor se perder conexão LoRa ===
-  if (throttle > 0 && (millis() - lastCommandTime > FAILSAFE_TIMEOUT)) {
+  if ((throttle > 0 || pitch != 0 || roll != 0) && (millis() - lastCommandTime > FAILSAFE_TIMEOUT)) {
     throttle = 0;
+    pitch = 0;
+    roll = 0;
     esc.writeMicroseconds(1000);
+    leftElevon.write(90);
+    rightElevon.write(90);
     failsafeActive = true;
   } else if (millis() - lastCommandTime <= FAILSAFE_TIMEOUT) {
     failsafeActive = false;
@@ -270,7 +402,17 @@ void loop() {
       LoRa.print("T:V=0.00,P=0,S=CAL_DONE");
       LoRa.endPacket();
     } else {
-      throttle = constrain(input.toInt(), 0, 100);
+      int parsedThrottle = 0, parsedPitch = 0, parsedRoll = 0;
+      if (sscanf(input.c_str(), "%d,%d,%d", &parsedThrottle, &parsedPitch, &parsedRoll) == 3) {
+        throttle = constrain(parsedThrottle, 0, 100);
+        pitch = constrain(parsedPitch, -100, 100);
+        roll = constrain(parsedRoll, -100, 100);
+      } else {
+        // Fallback backward compatibility
+        throttle = constrain(input.toInt(), 0, 100);
+        pitch = 0;
+        roll = 0;
+      }
 
       // Proteção de Subtensão (Desliga o motor se a bateria estiver crítica)
       if (isBatteryLow) {
@@ -285,10 +427,18 @@ void loop() {
       }
 
       esc.writeMicroseconds(pwmValue);
+
+      // Mixagem de Elevons (Pitch e Roll)
+      // Mapeando -100 a 100 para +/- 45 graus de curso no servo
+      int leftAngle = 90 + map(pitch, -100, 100, -45, 45) + map(roll, -100, 100, -45, 45);
+      int rightAngle = 90 + map(pitch, -100, 100, -45, 45) - map(roll, -100, 100, -45, 45);
+
+      leftElevon.write(constrain(leftAngle, 0, 180));
+      rightElevon.write(constrain(rightAngle, 0, 180));
     }
   }
 }
-`.trim();
+\n`.trim();
 
 export function CodeViewer() {
   const [copied, setCopied] = useState(false);
@@ -310,7 +460,7 @@ export function CodeViewer() {
             Código dos Microcontroladores
           </h2>
           <p className="text-xs text-slate-400 leading-relaxed italic pr-4">
-            Arquitetura wireless: ESP32 Bridge (USB↔LoRa) + Arduino Remoto (LoRa↔ESC). Filtro anti-sag, telemetria 2S Li-ion e compensação de zona morta preservados.
+            Arquitetura wireless: ESP32 BLE Bridge (BLE UART↔LoRa) + Arduino Remoto (LoRa↔ESC/Servos). Filtro anti-sag, telemetria 2S Li-ion e mixagem de elevons preservados.
           </p>
         </div>
         <button
@@ -333,7 +483,7 @@ export function CodeViewer() {
           }`}
         >
           <Radio className="w-3 h-3" />
-          Transmissor (ESP32 Bridge)
+          Bridge WiFi (ESP32)
         </button>
         <button
           onClick={() => { setActiveTab('arduino'); setCopied(false); }}
@@ -363,33 +513,47 @@ export function CodeViewer() {
         </pre>
       </div>
 
-      {/* Connection Diagram — Updated for LoRa architecture */}
+      {/* Connection Diagram - Updated for BLE + LoRa architecture */}
       <div className="border-t border-slate-800 pt-4 shrink-0">
-        <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">Diagrama da Arquitetura Wireless</h3>
+        <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">Diagrama da Arquitetura BLE + LoRa</h3>
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-3">
-            <div className="w-16 h-5 bg-slate-700 border border-slate-600 rounded-sm flex items-center justify-center text-[9px] font-bold text-white">PC/USB</div>
-            <div className="flex-1 h-px bg-slate-700 relative">
-              <div className="absolute -top-3 left-1/2 -translate-x-1/2 text-[9px] text-slate-500 italic whitespace-nowrap">Web Serial 115200</div>
+            <div className="w-20 h-5 bg-cyan-700 border border-cyan-600 rounded-sm flex items-center justify-center text-[9px] font-bold text-white">📱 Celular</div>
+            <div className="flex-1 h-px bg-blue-500/30 relative border-t border-dashed border-blue-500/50">
+              <div className="absolute -top-3 left-1/2 -translate-x-1/2 text-[9px] text-blue-400 italic whitespace-nowrap">~~~ BLE (Nordic UART) ~~~</div>
             </div>
             <div className="w-16 h-5 bg-amber-600 rounded-sm flex items-center justify-center text-[9px] font-bold text-white">ESP32</div>
           </div>
           <div className="flex items-center gap-3">
+            <div className="w-20 h-5 bg-slate-700 border border-slate-600 rounded-sm flex items-center justify-center text-[9px] font-bold text-white">BLE API</div>
+            <div className="flex-1 h-px bg-slate-700 relative">
+              <div className="absolute -top-3 left-1/2 -translate-x-1/2 text-[9px] text-slate-500 italic whitespace-nowrap">Service: 6E400001-...</div>
+            </div>
             <div className="w-16 h-5 bg-amber-600 rounded-sm flex items-center justify-center text-[9px] font-bold text-white">ESP32</div>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="w-20 h-5 bg-amber-600 rounded-sm flex items-center justify-center text-[9px] font-bold text-white">ESP32</div>
             <div className="flex-1 h-px bg-amber-500/30 relative border-t border-dashed border-amber-500/50">
               <div className="absolute -top-3 left-1/2 -translate-x-1/2 text-[9px] text-amber-500 italic whitespace-nowrap">~~~ LoRa 433MHz ~~~</div>
             </div>
             <div className="w-16 h-5 bg-emerald-600 rounded-sm flex items-center justify-center text-[9px] font-bold text-white">Arduino</div>
           </div>
           <div className="flex items-center gap-3">
-            <div className="w-16 h-5 bg-emerald-600 rounded-sm flex items-center justify-center text-[9px] font-bold text-white">Arduino</div>
+            <div className="w-20 h-5 bg-emerald-600 rounded-sm flex items-center justify-center text-[9px] font-bold text-white">Arduino</div>
             <div className="flex-1 h-px bg-slate-700 relative">
               <div className="absolute -top-3 left-1/2 -translate-x-1/2 text-[9px] text-slate-500 italic whitespace-nowrap">PWM Pino 6</div>
             </div>
             <div className="w-16 h-5 bg-rose-600 rounded-sm flex items-center justify-center text-[9px] font-bold text-white">ESC</div>
           </div>
           <div className="flex items-center gap-3">
-            <div className="w-16 h-5 bg-red-600 rounded-sm flex items-center justify-center text-[9px] font-bold text-white">VCC</div>
+            <div className="w-20 h-5 bg-emerald-600 rounded-sm flex items-center justify-center text-[9px] font-bold text-white">Arduino</div>
+            <div className="flex-1 h-px bg-slate-700 relative">
+              <div className="absolute -top-3 left-1/2 -translate-x-1/2 text-[9px] text-slate-500 italic whitespace-nowrap">PWM Pinos 3 e 5</div>
+            </div>
+            <div className="w-16 h-5 bg-cyan-600 rounded-sm flex items-center justify-center text-[9px] font-bold text-white">Servos L/R</div>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="w-20 h-5 bg-red-600 rounded-sm flex items-center justify-center text-[9px] font-bold text-white">VCC</div>
             <div className="flex-1 h-px bg-slate-700 relative">
               <div className="absolute -top-3 left-0 text-[9px] text-slate-500 italic">2S 18650 (7.4V)</div>
             </div>

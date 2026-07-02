@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Power, AlertOctagon, Radio, Signal, Activity, Gauge } from 'lucide-react';
-import type { TelemetryData } from '../hooks/useSerial';
+import type { TelemetryData } from '../hooks/useBluetooth';
 
 interface DashboardProps {
   isConnected: boolean;
@@ -32,8 +32,38 @@ function snrLabel(snr: number): { text: string; color: string } {
 
 export function Dashboard({ isConnected, send, telemetry, packetCount, lastPacketTime }: DashboardProps) {
   const [throttle, setThrottle] = useState(0);
+  const [pitch, setPitch] = useState(0);
+  const [roll, setRoll] = useState(0);
   const [isArmed, setIsArmed] = useState(false);
   const [timeSincePacket, setTimeSincePacket] = useState<number | null>(null);
+  const joystickRef = useRef<HTMLDivElement>(null);
+
+  const handleJoystickMove = (e: React.PointerEvent) => {
+    if (!isArmed || isBatteryLow) return;
+    if (e.buttons !== 1) return; // Only process if mouse button is held down (or touch)
+    if (!joystickRef.current) return;
+    
+    const rect = joystickRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    
+    const centerX = rect.width / 2;
+    const centerY = rect.height / 2;
+    
+    let newRoll = Math.round(((x - centerX) / centerX) * 100);
+    let newPitch = Math.round(((centerY - y) / centerY) * 100); // Inverted Y: up is positive
+    
+    newRoll = Math.max(-100, Math.min(100, newRoll));
+    newPitch = Math.max(-100, Math.min(100, newPitch));
+    
+    setRoll(newRoll);
+    setPitch(newPitch);
+  };
+
+  const handleJoystickRelease = () => {
+    setRoll(0);
+    setPitch(0);
+  };
 
   // Auto emergency disarm if Arduino reports battery error or failsafe
   useEffect(() => {
@@ -52,12 +82,25 @@ export function Dashboard({ isConnected, send, telemetry, packetCount, lastPacke
     }
   }, [timeSincePacket, isArmed, isConnected, send]);
 
-  // Send the throttle value to the serial port whenever it changes
+  // Send the values to the WebSocket/BLE whenever they change
   useEffect(() => {
     if (isConnected) {
-      send(`${throttle}\n`);
+      const valueToSend = throttle > 0 ? Math.round(6 + ((throttle - 1) * (100 - 6)) / (100 - 1)) : 0;
+      send(`${valueToSend},${pitch},${roll}\n`);
     }
-  }, [throttle, isConnected, send]);
+  }, [throttle, pitch, roll, isConnected, send]);
+
+  // Heartbeat: re-send telemetry every 300ms while armed to prevent Arduino failsafe.
+  // LoRa is half-duplex — the Arduino can't receive commands while transmitting telemetry.
+  // Without this, static controls cause 2s+ gaps in commands → failsafe triggers.
+  useEffect(() => {
+    if (!isConnected || !isArmed) return;
+    const interval = setInterval(() => {
+      const valueToSend = throttle > 0 ? Math.round(6 + ((throttle - 1) * (100 - 6)) / (100 - 1)) : 0;
+      send(`${valueToSend},${pitch},${roll}\n`);
+    }, 300);
+    return () => clearInterval(interval);
+  }, [isConnected, isArmed, throttle, pitch, roll, send]);
 
   // Update "time since last packet" every 200ms
   useEffect(() => {
@@ -153,7 +196,6 @@ export function Dashboard({ isConnected, send, telemetry, packetCount, lastPacke
         <div className="relative h-12 bg-slate-850/80 border border-slate-800/40 rounded-full w-full flex items-center px-1.5 mb-2">
           {/* Custom Track */}
           <div 
-            style={getThrottleGlow()}
             className={`h-9 rounded-full transition-all duration-150 ${
               isBatteryLow ? 'bg-slate-700' : 'bg-gradient-to-r from-amber-600 to-amber-400'
             }`} 
@@ -218,6 +260,57 @@ export function Dashboard({ isConnected, send, telemetry, packetCount, lastPacke
               EMERGENCY STOP
             </button>
           )}
+        </div>
+      </div>
+
+      {/* Elevon Control (2D Joystick) */}
+      <div 
+        className={`bg-slate-900/40 backdrop-blur-md rounded-xl p-6 border transition-all duration-300 ${
+          isBatteryLow ? 'border-rose-500/50' : 
+          isFailsafe ? 'border-amber-500/50' : 
+          'border-slate-800/80'
+        }`}
+      >
+        <div className="flex justify-between items-end mb-4">
+          <div>
+            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-0.5 block">Elevon Control (Pitch/Roll)</label>
+            <div className={`text-xl font-mono font-bold transition-all duration-150 ${isBatteryLow ? 'text-rose-500' : 'text-cyan-400'}`}>
+              P:{pitch} <span className="text-slate-600">|</span> R:{roll}
+            </div>
+          </div>
+          <div className="text-[9px] font-bold text-slate-500 uppercase">Flaperons / Elevons</div>
+        </div>
+
+        <div className="flex justify-center mt-2">
+          <div 
+            ref={joystickRef}
+            onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); handleJoystickMove(e); }}
+            onPointerMove={handleJoystickMove}
+            onPointerUp={(e) => { e.currentTarget.releasePointerCapture(e.pointerId); handleJoystickRelease(); }}
+            onPointerCancel={handleJoystickRelease}
+            className={`relative w-48 h-48 bg-slate-850/80 border-2 rounded-full overflow-hidden touch-none select-none transition-colors ${
+              isBatteryLow || !isArmed || !isConnected ? 'border-slate-800 cursor-not-allowed opacity-50' : 'border-cyan-900/60 cursor-crosshair'
+            }`}
+            style={{
+              boxShadow: 'inset 0 0 20px rgba(0,0,0,0.5)'
+            }}
+          >
+            {/* Axis Lines */}
+            <div className="absolute inset-x-0 top-1/2 h-px bg-slate-700/50 -translate-y-1/2 pointer-events-none"></div>
+            <div className="absolute inset-y-0 left-1/2 w-px bg-slate-700/50 -translate-x-1/2 pointer-events-none"></div>
+            
+            {/* Joystick Thumb */}
+            <div 
+              className="absolute w-12 h-12 bg-white rounded-full shadow-lg border-4 border-cyan-500 pointer-events-none transition-transform duration-75 ease-out"
+              style={{ 
+                left: '50%', top: '50%',
+                transform: `translate(calc(-50% + ${(roll / 100) * 80}px), calc(-50% + ${(-pitch / 100) * 80}px))`,
+                boxShadow: (pitch !== 0 || roll !== 0) ? '0 0 15px rgba(6, 182, 212, 0.5)' : 'none'
+              }}
+            >
+              <div className="absolute inset-1.5 bg-slate-200 rounded-full"></div>
+            </div>
+          </div>
         </div>
       </div>
 
