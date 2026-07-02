@@ -131,8 +131,12 @@ void setup() {
 
   pService->start();
 
-  pServer->getAdvertising()->addServiceUUID(SERVICE_UUID);
-  pServer->getAdvertising()->start();
+  BLEAdvertising *pAdvertising = pServer->getAdvertising();
+  pAdvertising->addServiceUUID(SERVICE_UUID);
+  pAdvertising->setScanResponse(true);
+  pAdvertising->setMinPreferred(0x06); // Funções auxiliares para conectividade
+  pAdvertising->setMinPreferred(0x12);
+  pAdvertising->start();
   
   Serial.println("[BLE] Aguardando conexão do Dashboard (ESC-TestBench-BLE)...");
 }

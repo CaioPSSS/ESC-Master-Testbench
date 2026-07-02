@@ -37,6 +37,7 @@ export function Dashboard({ isConnected, send, telemetry, packetCount, lastPacke
   const [isArmed, setIsArmed] = useState(false);
   const [timeSincePacket, setTimeSincePacket] = useState<number | null>(null);
   const joystickRef = useRef<HTMLDivElement>(null);
+  const lastSendTimeRef = useRef<number>(0);
 
   const handleJoystickMove = (e: React.PointerEvent) => {
     if (!isArmed || isBatteryLow) return;
@@ -82,25 +83,37 @@ export function Dashboard({ isConnected, send, telemetry, packetCount, lastPacke
     }
   }, [timeSincePacket, isArmed, isConnected, send]);
 
-  // Send the values to the WebSocket/BLE whenever they change
+  // Send the values to the WebSocket/BLE whenever they change, but limit to 20Hz (50ms) to prevent flooding
   useEffect(() => {
     if (isConnected) {
       const valueToSend = throttle > 0 ? Math.round(6 + ((throttle - 1) * (100 - 6)) / (100 - 1)) : 0;
-      send(`${valueToSend},${pitch},${roll}\n`);
+      const msg = `${valueToSend},${pitch},${roll}\n`;
+      
+      const now = Date.now();
+      if (now - lastSendTimeRef.current > 50) {
+        send(msg);
+        lastSendTimeRef.current = now;
+      } else {
+        const timer = setTimeout(() => {
+          send(msg);
+          lastSendTimeRef.current = Date.now();
+        }, 50);
+        return () => clearTimeout(timer);
+      }
     }
   }, [throttle, pitch, roll, isConnected, send]);
 
-  // Heartbeat: re-send telemetry every 300ms while armed to prevent Arduino failsafe.
+  // Heartbeat: re-send telemetry every 300ms to keep connection alive and prevent Arduino failsafe.
+  // We send it even if disarmed, so the Arduino can clear the failsafe state if the connection returns.
   // LoRa is half-duplex — the Arduino can't receive commands while transmitting telemetry.
-  // Without this, static controls cause 2s+ gaps in commands → failsafe triggers.
   useEffect(() => {
-    if (!isConnected || !isArmed) return;
+    if (!isConnected) return;
     const interval = setInterval(() => {
       const valueToSend = throttle > 0 ? Math.round(6 + ((throttle - 1) * (100 - 6)) / (100 - 1)) : 0;
       send(`${valueToSend},${pitch},${roll}\n`);
     }, 300);
     return () => clearInterval(interval);
-  }, [isConnected, isArmed, throttle, pitch, roll, send]);
+  }, [isConnected, throttle, pitch, roll, send]);
 
   // Update "time since last packet" every 200ms
   useEffect(() => {

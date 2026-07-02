@@ -128,15 +128,17 @@ void loop() {
   bool isBatteryLow = batteryVoltage < 6.0;
 
   // === FAILSAFE: Desliga motor se perder conexão LoRa ===
-  if ((throttle > 0 || pitch != 0 || roll != 0) && (millis() - lastCommandTime > FAILSAFE_TIMEOUT)) {
-    throttle = 0;
-    pitch = 0;
-    roll = 0;
-    esc.writeMicroseconds(1000);
-    leftElevon.write(90);
-    rightElevon.write(90);
+  if (millis() - lastCommandTime > FAILSAFE_TIMEOUT) {
+    if (throttle > 0 || pitch != 0 || roll != 0) {
+      throttle = 0;
+      pitch = 0;
+      roll = 0;
+      esc.writeMicroseconds(1000);
+      leftElevon.write(90);
+      rightElevon.write(90);
+    }
     failsafeActive = true;
-  } else if (millis() - lastCommandTime <= FAILSAFE_TIMEOUT) {
+  } else {
     failsafeActive = false;
   }
 
