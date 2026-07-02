@@ -83,23 +83,32 @@ export function Dashboard({ isConnected, send, telemetry, packetCount, lastPacke
     }
   }, [timeSincePacket, isArmed, isConnected, send]);
 
-  // Send the values to the WebSocket/BLE whenever they change, but limit to 20Hz (50ms) to prevent flooding
+  const pendingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Rate-limit state changes to max 10Hz (100ms) to prevent LoRa/BLE flooding (Throttle pattern)
   useEffect(() => {
-    if (isConnected) {
-      const valueToSend = throttle > 0 ? Math.round(6 + ((throttle - 1) * (100 - 6)) / (100 - 1)) : 0;
-      const msg = `${valueToSend},${pitch},${roll}\n`;
-      
-      const now = Date.now();
-      if (now - lastSendTimeRef.current > 50) {
-        send(msg);
-        lastSendTimeRef.current = now;
-      } else {
-        const timer = setTimeout(() => {
-          send(msg);
-          lastSendTimeRef.current = Date.now();
-        }, 50);
-        return () => clearTimeout(timer);
+    if (!isConnected) return;
+    
+    const valueToSend = throttle > 0 ? Math.round(6 + ((throttle - 1) * (100 - 6)) / (100 - 1)) : 0;
+    const msg = `${valueToSend},${pitch},${roll}\n`;
+    
+    const now = Date.now();
+    if (now - lastSendTimeRef.current > 100) {
+      // Se já passou 100ms desde o último envio, manda agora imediatamente
+      if (pendingTimerRef.current) {
+        clearTimeout(pendingTimerRef.current);
+        pendingTimerRef.current = null;
       }
+      send(msg);
+      lastSendTimeRef.current = now;
+    } else if (!pendingTimerRef.current) {
+      // Se não passou 100ms e ainda não temos um timer agendado, agenda um!
+      // Isso garante que o último estado da fila seja sempre enviado assim que o rate-limit permitir
+      pendingTimerRef.current = setTimeout(() => {
+        send(msg);
+        lastSendTimeRef.current = Date.now();
+        pendingTimerRef.current = null;
+      }, 100 - (now - lastSendTimeRef.current));
     }
   }, [throttle, pitch, roll, isConnected, send]);
 

@@ -152,19 +152,28 @@ void loop() {
     if (hasPendingCommand) {
       sendCmd = true;
       cmdToSend = pendingCommand;
-      hasPendingCommand = false;
+      // Não mudamos hasPendingCommand para false aqui ainda!
     }
     xSemaphoreGive(cmdMutex);
   }
 
   if (sendCmd && hasLoRa) {
     unsigned long now = millis();
-    if (now - lastTxTime > 40) {
+    // Limite de 10Hz (100ms) para evitar afogar o LoRa (Half-Duplex) e colidir com telemetria
+    if (now - lastTxTime > 100) {
       LoRa.beginPacket();
       LoRa.print(cmdToSend);
       LoRa.endPacket();
       LoRa.receive(); // Retorna explicitamente ao modo de recepção contínua
       lastTxTime = now;
+      
+      // Agora limpamos a flag, mas APENAS se o comando não mudou nesse meio tempo
+      if (xSemaphoreTake(cmdMutex, portMAX_DELAY)) {
+        if (pendingCommand == cmdToSend) {
+          hasPendingCommand = false;
+        }
+        xSemaphoreGive(cmdMutex);
+      }
     }
   }
 
