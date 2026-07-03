@@ -42,8 +42,8 @@ const int rightElevonPin = 5;
 const int voltagePin = A0;
 
 // Trims mecânicos dos servos (Compensação de montagem física)
-const int LEFT_TRIM = 5;   // +5 graus para asa esquerda
-const int RIGHT_TRIM = 0; // -8 graus para asa direita
+const int LEFT_TRIM = 50;   // +10 graus para asa esquerda (subiu 5 graus)
+const int RIGHT_TRIM = -58; // -18 graus para asa direita (subiu 5 graus - espelhado)
 const int LEFT_CENTER = 90 + LEFT_TRIM;
 const int RIGHT_CENTER = 90 + RIGHT_TRIM;
 

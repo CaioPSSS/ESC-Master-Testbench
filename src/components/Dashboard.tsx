@@ -39,6 +39,12 @@ export function Dashboard({ isConnected, send, telemetry, packetCount, lastPacke
   const joystickRef = useRef<HTMLDivElement>(null);
   const lastSendTimeRef = useRef<number>(0);
 
+  // Trims de Software (evita ter que regravar o firmware do Arduino)
+  // pitch = 26 (15 para alinhar + 11 para subir 5 graus)
+  // roll = 15 (para alinhar)
+  const PITCH_TRIM = 26;
+  const ROLL_TRIM = 15;
+
   const handleJoystickMove = (e: React.PointerEvent) => {
     if (!isArmed || isBatteryLow) return;
     if (e.buttons !== 1) return; // Only process if mouse button is held down (or touch)
@@ -90,7 +96,9 @@ export function Dashboard({ isConnected, send, telemetry, packetCount, lastPacke
     if (!isConnected) return;
     
     const valueToSend = throttle > 0 ? Math.round(6 + ((throttle - 1) * (100 - 6)) / (100 - 1)) : 0;
-    const msg = `${valueToSend},${pitch},${roll}\n`;
+    const pitchToSend = Math.max(-100, Math.min(100, pitch + PITCH_TRIM));
+    const rollToSend = Math.max(-100, Math.min(100, roll + ROLL_TRIM));
+    const msg = `${valueToSend},${pitchToSend},${rollToSend}\n`;
     
     const now = Date.now();
     if (now - lastSendTimeRef.current > 100) {
@@ -119,7 +127,9 @@ export function Dashboard({ isConnected, send, telemetry, packetCount, lastPacke
     if (!isConnected) return;
     const interval = setInterval(() => {
       const valueToSend = throttle > 0 ? Math.round(6 + ((throttle - 1) * (100 - 6)) / (100 - 1)) : 0;
-      send(`${valueToSend},${pitch},${roll}\n`);
+      const pitchToSend = Math.max(-100, Math.min(100, pitch + PITCH_TRIM));
+      const rollToSend = Math.max(-100, Math.min(100, roll + ROLL_TRIM));
+      send(`${valueToSend},${pitchToSend},${rollToSend}\n`);
     }, 300);
     return () => clearInterval(interval);
   }, [isConnected, throttle, pitch, roll, send]);
