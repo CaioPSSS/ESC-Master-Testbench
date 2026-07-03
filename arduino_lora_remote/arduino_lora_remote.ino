@@ -41,6 +41,12 @@ const int leftElevonPin = 3;
 const int rightElevonPin = 5;
 const int voltagePin = A0;
 
+// Trims mecânicos dos servos (Compensação de montagem física)
+const int LEFT_TRIM = 5;   // +5 graus para asa esquerda
+const int RIGHT_TRIM = 0; // -8 graus para asa direita
+const int LEFT_CENTER = 90 + LEFT_TRIM;
+const int RIGHT_CENTER = 90 + RIGHT_TRIM;
+
 // Configuração do Divisor de Tensão
 // Se R1 e R2 forem iguais (ex: 8k/8k ou 10k/10k), a tensão é dividida por 2. (Fator = 2.0)
 const float voltageDividerFactor = 2.0;
@@ -81,10 +87,10 @@ void setup() {
   leftElevon.attach(leftElevonPin);
   rightElevon.attach(rightElevonPin);
 
-  // Arming do ESC (1000us) e centraliza servos (90)
+  // Arming do ESC (1000us) e centraliza servos com seus trims
   esc.writeMicroseconds(1000);
-  leftElevon.write(90);
-  rightElevon.write(90);
+  leftElevon.write(LEFT_CENTER);
+  rightElevon.write(RIGHT_CENTER);
   delay(2000);
 
   Serial.println("Arduino LoRa Remoto pronto. 2S Li-ion (Com Telemetria).");
@@ -134,8 +140,8 @@ void loop() {
       pitch = 0;
       roll = 0;
       esc.writeMicroseconds(1000);
-      leftElevon.write(90);
-      rightElevon.write(90);
+      leftElevon.write(LEFT_CENTER);
+      rightElevon.write(RIGHT_CENTER);
     }
     failsafeActive = true;
   } else {
@@ -229,8 +235,8 @@ void loop() {
       // Mixagem de Elevons (Corrigida para Servos Fisicamente Espelhados)
       // Pitch (Arfagem): Servos devem se mover em direções opostas (pois estão espelhados) para subir/descer juntos.
       // Roll (Rolagem): Servos devem se mover na mesma direção para que uma asa suba e a outra desça.
-      int leftAngle = 90 + map(pitch, -100, 100, -45, 45) + map(roll, -100, 100, 45, -45);
-      int rightAngle = 90 + map(pitch, -100, 100, 45, -45) + map(roll, -100, 100, 45, -45);
+      int leftAngle = LEFT_CENTER + map(pitch, -100, 100, -45, 45) + map(roll, -100, 100, 45, -45);
+      int rightAngle = RIGHT_CENTER + map(pitch, -100, 100, 45, -45) + map(roll, -100, 100, 45, -45);
 
       leftElevon.write(constrain(leftAngle, 0, 180));
       rightElevon.write(constrain(rightAngle, 0, 180));
