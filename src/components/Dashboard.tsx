@@ -345,8 +345,8 @@ export function Dashboard({ isConnected, send, telemetry, packetCount, lastPacke
           </div>
 
           {/* LoRa Diagnostics (Moved here to fill empty space) */}
-          <div className="bg-slate-900/40 backdrop-blur-md border border-slate-800/80 p-4 rounded-xl flex-1 flex flex-col">
-            <div className="flex items-center gap-2 border-b border-slate-800/60 pb-3 mb-4">
+          <div className="bg-slate-900/40 backdrop-blur-md border border-slate-800/80 p-3 rounded-xl flex-1 flex flex-col">
+            <div className="flex items-center gap-2 border-b border-slate-800/60 pb-2 mb-2.5">
               <Radio className="w-4 h-4 text-amber-500" />
               <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Link LoRa 433MHz</h3>
               
@@ -370,16 +370,16 @@ export function Dashboard({ isConnected, send, telemetry, packetCount, lastPacke
               </div>
             </div>
 
-            <div className="space-y-4 flex-1 flex flex-col justify-between">
+            <div className="space-y-2 flex-1 flex flex-col justify-between">
               {/* Link Quality */}
-              <div className="bg-slate-900/60 border border-slate-800/80 p-3 rounded-lg flex items-center justify-between">
+              <div className="bg-slate-900/60 border border-slate-800/80 py-1.5 px-3 rounded-lg flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <Gauge className="w-4 h-4 text-amber-400" />
                   <span className="text-[10px] text-slate-400 font-bold uppercase">Qualidade</span>
                 </div>
                 {espQuality !== null ? (
                   <div className="flex items-center gap-2">
-                    <div className="flex gap-0.5 items-end h-4">
+                    <div className="flex gap-0.5 items-end h-3.5">
                       {[...Array(5)].map((_, i) => (
                         <div
                           key={i}
@@ -388,39 +388,39 @@ export function Dashboard({ isConnected, send, telemetry, packetCount, lastPacke
                         ></div>
                       ))}
                     </div>
-                    <span className={`text-sm font-mono font-bold ${espQuality >= 70 ? 'text-emerald-400' : espQuality >= 40 ? 'text-amber-400' : 'text-rose-500'}`}>{espQuality}%</span>
+                    <span className={`text-sm font-mono font-bold leading-none ${espQuality >= 70 ? 'text-emerald-400' : espQuality >= 40 ? 'text-amber-400' : 'text-rose-500'}`}>{espQuality}%</span>
                   </div>
                 ) : (
-                  <span className="text-sm font-mono text-slate-600 font-bold">—</span>
+                  <span className="text-sm font-mono text-slate-600 font-bold leading-none">—</span>
                 )}
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div className="bg-slate-900/60 border border-slate-800/80 p-3 rounded-lg flex flex-col justify-between">
-                  <div className="flex items-center gap-1.5 mb-2">
+              <div className="grid grid-cols-2 gap-2">
+                <div className="bg-slate-900/60 border border-slate-800/80 p-2 rounded-lg flex flex-col justify-between">
+                  <div className="flex items-center gap-1.5 mb-1">
                     <Signal className="w-3.5 h-3.5 text-cyan-400" />
                     <span className="text-[9px] text-slate-500 font-bold uppercase">RSSI (Bridge)</span>
                   </div>
                   <div className="flex items-end justify-between">
                     <div className="text-base font-mono text-white font-bold leading-none">{espRssi !== null ? `${espRssi}` : '—'}</div>
-                    <span className="text-[9px] text-slate-500 font-normal">dBm</span>
+                    <span className="text-[9px] text-slate-500 font-normal leading-none">dBm</span>
                   </div>
                 </div>
-                <div className="bg-slate-900/60 border border-slate-800/80 p-3 rounded-lg flex flex-col justify-between">
-                  <div className="flex items-center gap-1.5 mb-2">
+                <div className="bg-slate-900/60 border border-slate-800/80 p-2 rounded-lg flex flex-col justify-between">
+                  <div className="flex items-center gap-1.5 mb-1">
                     <Signal className="w-3.5 h-3.5 text-emerald-400" />
                     <span className="text-[9px] text-slate-500 font-bold uppercase">RSSI (Nano)</span>
                   </div>
                   <div className="flex items-end justify-between">
                     <div className="text-base font-mono text-white font-bold leading-none">{ardRssi !== null ? `${ardRssi}` : '—'}</div>
-                    <span className="text-[9px] text-slate-500 font-normal">dBm</span>
+                    <span className="text-[9px] text-slate-500 font-normal leading-none">dBm</span>
                   </div>
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div className="bg-slate-900/60 border border-slate-800/80 p-3 rounded-lg flex flex-col justify-between">
-                  <div className="flex items-center gap-1.5 mb-2">
+              <div className="grid grid-cols-2 gap-2">
+                <div className="bg-slate-900/60 border border-slate-800/80 p-2 rounded-lg flex flex-col justify-between">
+                  <div className="flex items-center gap-1.5 mb-1">
                     <Activity className="w-3.5 h-3.5 text-cyan-400" />
                     <span className="text-[9px] text-slate-500 font-bold uppercase">SNR (Ruído)</span>
                   </div>
@@ -428,11 +428,11 @@ export function Dashboard({ isConnected, send, telemetry, packetCount, lastPacke
                     <div className="text-base font-mono text-white font-bold leading-none">
                       {espSnr !== null ? `${espSnr > 0 ? '+' : ''}${espSnr.toFixed(1)}` : '—'}
                     </div>
-                    <span className="text-[9px] text-slate-500 font-normal">dB</span>
+                    <span className="text-[9px] text-slate-500 font-normal leading-none">dB</span>
                   </div>
                 </div>
-                <div className="bg-slate-900/60 border border-slate-800/80 p-3 rounded-lg flex flex-col justify-between">
-                  <div className="flex items-center gap-1.5 mb-2">
+                <div className="bg-slate-900/60 border border-slate-800/80 p-2 rounded-lg flex flex-col justify-between">
+                  <div className="flex items-center gap-1.5 mb-1">
                     <Radio className="w-3.5 h-3.5 text-amber-400" />
                     <span className="text-[9px] text-slate-500 font-bold uppercase">Pacotes</span>
                   </div>
