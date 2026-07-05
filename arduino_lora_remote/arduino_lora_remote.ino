@@ -65,6 +65,9 @@ float bmp_altitude = 0, base_pressure = 0;
 // GPS Data
 float gps_lat = -12.9714; // Default inicial solicitado
 float gps_lon = -38.5104;
+int gps_satellites = 0;
+int gps_fix_quality = 0;
+float gps_course = 0;
 
 // Leitura NMEA simplificada
 void readGPS() {
@@ -98,6 +101,26 @@ void readGPS() {
             gps_lon = lonDeg + (lonMin/60.0);
             if(lonDir == "W") gps_lon = -gps_lon;
           }
+          if(cIdx >= 9) {
+            String courseStr = sentence.substring(commaIdx[7]+1, commaIdx[8]);
+            if(courseStr.length() > 0) gps_course = courseStr.toFloat();
+          }
+        }
+      } else if (sentence.startsWith("$GPGGA") || sentence.startsWith("$GNGGA")) {
+        int commaIdx[15];
+        int cIdx = 0;
+        for(int i=0; i<sentence.length(); i++) {
+          if(sentence[i] == ',') {
+            commaIdx[cIdx++] = i;
+            if(cIdx >= 15) break;
+          }
+        }
+        if(cIdx >= 8) {
+          String fixQualStr = sentence.substring(commaIdx[5]+1, commaIdx[6]);
+          String satStr = sentence.substring(commaIdx[6]+1, commaIdx[7]);
+          
+          if(fixQualStr.length() > 0) gps_fix_quality = fixQualStr.toInt();
+          if(satStr.length() > 0) gps_satellites = satStr.toInt();
         }
       }
       sentence = "";
@@ -267,7 +290,10 @@ void loop() {
                        ",ROL=" + String(roll_mpu, 1) + 
                        ",ALT=" + String(bmp_altitude, 1) + 
                        ",LAT=" + String(gps_lat, 6) + 
-                       ",LON=" + String(gps_lon, 6);
+                       ",LON=" + String(gps_lon, 6) +
+                       ",SAT=" + String(gps_satellites) +
+                       ",FIX=" + String(gps_fix_quality) +
+                       ",CRS=" + String(gps_course, 1);
 
     LoRa.beginPacket();
     LoRa.print(telemetry);

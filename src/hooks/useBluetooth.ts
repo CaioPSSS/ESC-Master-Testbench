@@ -12,6 +12,9 @@ export interface TelemetryData {
   alt?: string; // Altitude (BMP280)
   lat?: string; // Latitude (GPS)
   lon?: string; // Longitude (GPS)
+  sat?: string; // Satellites (GPS)
+  fix?: string; // Fix Quality (GPS)
+  crs?: string; // Course (GPS)
 }
 
 // UUIDs padrão Nordic UART
