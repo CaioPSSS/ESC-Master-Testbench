@@ -3,10 +3,15 @@ import { useState, useRef, useCallback } from 'react';
 export interface TelemetryData {
   v?: string;   // Voltage
   p?: string;   // Battery percent
-  s?: string;   // Status (OK, ERROR_BATTERY, CALIBRATING, CAL_DONE)
-  r?: string;   // RSSI at ESP32 (signal from Arduino)
+  s?: string;   // Status
+  r?: string;   // RSSI at ESP32
   n?: string;   // SNR at ESP32
-  ar?: string;  // RSSI at Arduino (signal from ESP32)
+  ar?: string;  // RSSI at Arduino
+  pit?: string; // Pitch (MPU6050)
+  rol?: string; // Roll (MPU6050)
+  alt?: string; // Altitude (BMP280)
+  lat?: string; // Latitude (GPS)
+  lon?: string; // Longitude (GPS)
 }
 
 // UUIDs padrão Nordic UART

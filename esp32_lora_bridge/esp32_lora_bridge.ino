@@ -106,6 +106,9 @@ void setup() {
   // 2. Inicialização BLE
   BLEDevice::init("ESC-TestBench-BLE");
   
+  // Tenta aumentar o MTU para lidar com pacotes LoRa muito compridos
+  BLEDevice::setMTU(512);
+
   // Opcional: Aumenta a potência do BLE para +9dBm (máximo do ESP32)
   BLEDevice::setPower(ESP_PWR_LVL_P9);
 

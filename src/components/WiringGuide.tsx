@@ -45,12 +45,20 @@ export function WiringGuide() {
                 <span className="text-xs text-amber-400">SX1278 Ra-02 433MHz</span>
               </div>
               <div className="bg-slate-900 p-3 flex justify-between">
+                <span className="text-xs text-slate-500">Sensores I2C</span>
+                <span className="text-xs text-fuchsia-400">MPU6050 e BMP280</span>
+              </div>
+              <div className="bg-slate-900 p-3 flex justify-between">
+                <span className="text-xs text-slate-500">Sensor GPS</span>
+                <span className="text-xs text-rose-400">NEO6MV2</span>
+              </div>
+              <div className="bg-slate-900 p-3 flex justify-between">
                 <span className="text-xs text-slate-500">MCU Bridge</span>
                 <span className="text-xs text-amber-400">ESP32 DevKit V1</span>
               </div>
               <div className="bg-slate-900 p-3 flex justify-between">
                 <span className="text-xs text-slate-500">MCU Remoto</span>
-                <span className="text-xs text-emerald-400">Arduino Uno</span>
+                <span className="text-xs text-emerald-400">Arduino Nano</span>
               </div>
               <div className="bg-slate-900 p-3 flex justify-between">
                 <span className="text-xs text-slate-500">Servos (Elevons)</span>
@@ -169,7 +177,15 @@ export function WiringGuide() {
               </div>
               <div className="flex flex-col border-t border-slate-800 pt-4 mt-2">
                 <span className="text-[10px] font-bold text-emerald-500 uppercase">3. Arduino Remoto (Lado do Motor e Servos)</span>
-                <span className="text-xs text-slate-400 mt-1">Conecte o módulo LoRa SX1278 ao Arduino Uno via SPI (veja a tabela acima). O fio de sinal PWM do ESC (Amarelo) vai no <strong>Pino 6</strong> (o Pino 9 é usado pelo LoRa NRESET). Os <strong>Servos dos Elevons</strong> vão nos <strong>Pinos 3 (Esquerdo) e 5 (Direito)</strong>. O GND do Arduino deve ser comum ao GND do ESC e dos servos. Se o Arduino for alimentado pela bateria (via regulador), o BEC do ESC pode ser desconectado.</span>
+                <span className="text-xs text-slate-400 mt-1">Conecte o módulo LoRa SX1278 ao Arduino Nano via SPI (veja a tabela acima). O fio de sinal PWM do ESC (Amarelo) vai no <strong>Pino 6</strong> (o Pino 9 é usado pelo LoRa NRESET). Os <strong>Servos dos Elevons</strong> vão nos <strong>Pinos 3 (Esquerdo) e 5 (Direito)</strong>. O GND do Arduino deve ser comum ao GND do ESC e dos servos. Se o Arduino for alimentado pela bateria (via regulador), o BEC do ESC pode ser desconectado.</span>
+              </div>
+              <div className="flex flex-col border-t border-slate-800 pt-4 mt-2">
+                <span className="text-[10px] font-bold text-fuchsia-400 uppercase">3.1. Sensores I2C (MPU6050 e BMP280)</span>
+                <span className="text-xs text-slate-400 mt-1">Conecte os pinos <strong>SDA</strong> de ambos os sensores ao pino <strong>A4</strong> do Arduino Nano, e o <strong>SCL</strong> ao <strong>A5</strong>. Ambos operam no mesmo barramento I2C, mas possuem endereços diferentes (0x68 e 0x76). Podem ser alimentados via pino 3.3V do Nano ou módulo externo.</span>
+              </div>
+              <div className="flex flex-col border-t border-slate-800 pt-4 mt-2">
+                <span className="text-[10px] font-bold text-indigo-400 uppercase">3.2. Sensor GPS (NEO6MV2)</span>
+                <span className="text-xs text-slate-400 mt-1">Conecte o pino <strong>TX</strong> do GPS ao pino <strong>D4 (RX)</strong> do Arduino Nano. Conecte o pino <strong>RX</strong> do GPS ao pino <strong>D7 (TX)</strong> do Arduino. Use um baud rate de 9600. <strong>Aviso:</strong> O GPS precisa de visada clara para o céu e na primeira vez que for ligado (cold start), pode levar de 2 a 10 minutos para obter sinal de satélite.</span>
               </div>
               <div className="flex flex-col border-t border-slate-800 pt-4 mt-2">
                 <span className="text-[10px] font-bold text-rose-500 uppercase">4. Atenção: Alimentação do LoRa</span>

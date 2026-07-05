@@ -1,151 +1,231 @@
 /*
- * ESC Master Testbench — Receptor Remoto (Arduino Uno)
+ * ESC Master Testbench — Receptor Remoto (Arduino Uno/Nano)
  * Recebe comandos de throttle via LoRa e controla o ESC
- * Envia telemetria da bateria 2S de volta via LoRa
- *
- * Módulo LoRa: SX1278 Ra-02 433MHz
- * Biblioteca: LoRa.h (Sandeep Mistry)
- * Pinagem SPI:
- *   NSS  = D10
- *   RST  = D9
- *   DIO0 = D2
- *   SCK  = D13  (SPI padrão)
- *   MISO = D12  (SPI padrão)
- *   MOSI = D11  (SPI padrão)
- *
- * ATENÇÃO: O pino PWM do ESC mudou de D9 para D6,
- * pois D9 agora é usado pelo LoRa (NRESET).
- *
- * Bateria: 2x 18650 3000mAh 3.7V 30A Liitokala (Série 2S)
- * Tensão Nominal: 7.4V | Carga Máx: 8.4V
- * Proteção de Subtensão via Código (Corte de Software ~6.0V)
- * Conexão do Sinal: Pino 6 (PWM) | Sensor: Pino A0 (Divisor R1=R2)
+ * Envia telemetria da bateria 2S, MPU6050, BMP280 e NEO6M GPS
  */
 
 #include <SPI.h>
 #include <LoRa.h>
 #include <Servo.h>
+#include <Wire.h>
+#include <SoftwareSerial.h>
 
-// Pinos do LoRa no Arduino Uno
+// --- Pinos ---
 #define LORA_NSS   10
 #define LORA_RST   9
 #define LORA_DIO0  2
+#define LORA_FREQ  433E6
 
-#define LORA_FREQ  433E6  // 433 MHz (deve ser igual ao ESP32)
-
-Servo esc;
-Servo leftElevon;
-Servo rightElevon;
-const int escPin = 6;      // Pino PWM (mudou de D9 para D6 por causa do LoRa)
+const int escPin = 6;
 const int leftElevonPin = 3;
 const int rightElevonPin = 5;
 const int voltagePin = A0;
 
-// Centros Mecânicos (Ajustados fisicamente)
+// GPS no SoftwareSerial
+SoftwareSerial gpsSerial(4, 7); // RX(D4), TX(D7)
+
+Servo esc;
+Servo leftElevon;
+Servo rightElevon;
+
+// Centros Mecânicos e Limites
 const int LEFT_CENTER = 105;
 const int RIGHT_CENTER = 70;
-
-// Limites Mecânicos (Evita travamento na fuselagem)
-// Baseado no teste de Auto-Stall (Queda de Tensão) - recuados 2 graus por segurança
-const int LEFT_MIN = 46;  // (Travou em 44)
-const int LEFT_MAX = 150; // (Travou em 152)
-
-// Limites do Direito estimados pelo "throw" simétrico do esquerdo (~46 graus)
+const int LEFT_MIN = 46;
+const int LEFT_MAX = 150;
 const int RIGHT_MIN = 24; 
 const int RIGHT_MAX = 116;
 
-// Configuração do Divisor de Tensão
-// Se R1 e R2 forem iguais (ex: 8k/8k ou 10k/10k), a tensão é dividida por 2. (Fator = 2.0)
 const float voltageDividerFactor = 2.0;
-const float referenceVoltage = 5.0; // Tensão de operação do Arduino (5V)
-
-// Fator de calibração: compensa tolerância dos resistores e referência real do Arduino.
+const float referenceVoltage = 5.0;
 const float VOLTAGE_CALIBRATION = 0.966;
 
-int throttle = 0; // 0 a 100 (%)
-int pitch = 0;    // -100 a 100
-int roll = 0;     // -100 a 100
-int lastCmdRssi = 0; // RSSI do último comando recebido do ESP32
+int throttle = 0, pitch_cmd = 0, roll_cmd = 0;
+int lastCmdRssi = 0;
 unsigned long lastTelemetryTime = 0;
 unsigned long lastVoltageReadTime = 0;
-unsigned long lastCommandTime = 0; // Failsafe: última vez que recebeu comando LoRa
-const unsigned long FAILSAFE_TIMEOUT = 2000; // 2 segundos sem comando = motor para
+unsigned long lastCommandTime = 0;
+const unsigned long FAILSAFE_TIMEOUT = 2000;
 float filteredVoltage = 0.0;
 bool firstRead = true;
 bool failsafeActive = false;
 
-void setup() {
-  Serial.begin(115200); // Debug local (opcional)
+// Sensores MPU6050
+const int MPU_addr = 0x68;
+int16_t AcX, AcY, AcZ;
+float pitch_mpu = 0, roll_mpu = 0;
 
-  // Inicializa LoRa
-  LoRa.setPins(LORA_NSS, LORA_RST, LORA_DIO0);
+// Sensores BMP280
+const int BMP_addr = 0x76;
+uint16_t dig_T1; int16_t dig_T2, dig_T3;
+uint16_t dig_P1; int16_t dig_P2, dig_P3, dig_P4, dig_P5, dig_P6, dig_P7, dig_P8, dig_P9;
+int32_t t_fine;
+float bmp_altitude = 0, base_pressure = 0;
 
-  if (!LoRa.begin(LORA_FREQ)) {
-    Serial.println("ERRO: Falha ao inicializar LoRa!");
-    while (1);
+// GPS Data
+float gps_lat = -12.9714; // Default inicial solicitado
+float gps_lon = -38.5104;
+
+// Leitura NMEA simplificada
+void readGPS() {
+  while (gpsSerial.available() > 0) {
+    char c = gpsSerial.read();
+    static String sentence = "";
+    if (c == '\n') {
+      if (sentence.startsWith("$GPRMC") || sentence.startsWith("$GNRMC")) {
+        int commaIdx[13];
+        int cIdx = 0;
+        for(int i=0; i<sentence.length(); i++) {
+          if(sentence[i] == ',') {
+            commaIdx[cIdx++] = i;
+            if(cIdx >= 13) break;
+          }
+        }
+        if(cIdx >= 7 && sentence.charAt(commaIdx[1]+1) == 'A') { // A = Active
+          String latStr = sentence.substring(commaIdx[2]+1, commaIdx[3]);
+          String latDir = sentence.substring(commaIdx[3]+1, commaIdx[4]);
+          String lonStr = sentence.substring(commaIdx[4]+1, commaIdx[5]);
+          String lonDir = sentence.substring(commaIdx[5]+1, commaIdx[6]);
+          
+          if(latStr.length() > 2 && lonStr.length() > 3) {
+            float latDeg = latStr.substring(0,2).toFloat();
+            float latMin = latStr.substring(2).toFloat();
+            gps_lat = latDeg + (latMin/60.0);
+            if(latDir == "S") gps_lat = -gps_lat;
+            
+            float lonDeg = lonStr.substring(0,3).toFloat();
+            float lonMin = lonStr.substring(3).toFloat();
+            gps_lon = lonDeg + (lonMin/60.0);
+            if(lonDir == "W") gps_lon = -gps_lon;
+          }
+        }
+      }
+      sentence = "";
+    } else if (c != '\r') {
+      sentence += c;
+    }
+    if(sentence.length() > 80) sentence = ""; // Previne leak
   }
+}
 
+// Inicializa BMP280 e le coeficientes
+void initBMP280() {
+  Wire.beginTransmission(BMP_addr);
+  Wire.write(0x88);
+  Wire.endTransmission();
+  Wire.requestFrom(BMP_addr, 24);
+  if(Wire.available() == 24) {
+    dig_T1 = Wire.read() | (Wire.read() << 8);
+    dig_T2 = Wire.read() | (Wire.read() << 8);
+    dig_T3 = Wire.read() | (Wire.read() << 8);
+    dig_P1 = Wire.read() | (Wire.read() << 8);
+    dig_P2 = Wire.read() | (Wire.read() << 8);
+    dig_P3 = Wire.read() | (Wire.read() << 8);
+    dig_P4 = Wire.read() | (Wire.read() << 8);
+    dig_P5 = Wire.read() | (Wire.read() << 8);
+    dig_P6 = Wire.read() | (Wire.read() << 8);
+    dig_P7 = Wire.read() | (Wire.read() << 8);
+    dig_P8 = Wire.read() | (Wire.read() << 8);
+    dig_P9 = Wire.read() | (Wire.read() << 8);
+  }
+  Wire.beginTransmission(BMP_addr);
+  Wire.write(0xF4);
+  Wire.write(0x27); // Normal mode, temp and press x1
+  Wire.endTransmission();
+  Wire.beginTransmission(BMP_addr);
+  Wire.write(0xF5);
+  Wire.write(0xA0); // Standby 1000ms
+  Wire.endTransmission();
+}
+
+float readBMP280Pressure() {
+  Wire.beginTransmission(BMP_addr);
+  Wire.write(0xF7);
+  Wire.endTransmission();
+  Wire.requestFrom(BMP_addr, 6);
+  if(Wire.available() != 6) return 0;
+  uint32_t press_msb = Wire.read();
+  uint32_t press_lsb = Wire.read();
+  uint32_t press_xlsb = Wire.read();
+  uint32_t temp_msb = Wire.read();
+  uint32_t temp_lsb = Wire.read();
+  uint32_t temp_xlsb = Wire.read();
+
+  int32_t adc_T = (temp_msb << 12) | (temp_lsb << 4) | (temp_xlsb >> 4);
+  int32_t var1_t = ((((adc_T >> 3) - ((int32_t)dig_T1 << 1))) * ((int32_t)dig_T2)) >> 11;
+  int32_t var2_t = (((((adc_T >> 4) - ((int32_t)dig_T1)) * ((adc_T >> 4) - ((int32_t)dig_T1))) >> 12) * ((int32_t)dig_T3)) >> 14;
+  t_fine = var1_t + var2_t;
+
+  int32_t adc_P = (press_msb << 12) | (press_lsb << 4) | (press_xlsb >> 4);
+  int64_t var1_p, var2_p, p;
+  var1_p = ((int64_t)t_fine) - 128000;
+  var2_p = var1_p * var1_p * (int64_t)dig_P6;
+  var2_p = var2_p + ((var1_p * (int64_t)dig_P5) << 17);
+  var2_p = var2_p + (((int64_t)dig_P4) << 35);
+  var1_p = ((var1_p * var1_p * (int64_t)dig_P3) >> 8) + ((var1_p * (int64_t)dig_P2) << 12);
+  var1_p = (((((int64_t)1) << 47) + var1_p)) * ((int64_t)dig_P1) >> 33;
+
+  if (var1_p == 0) return 0;
+  p = 1048576 - adc_P;
+  p = (((p << 31) - var2_p) * 3125) / var1_p;
+  var1_p = (((int64_t)dig_P9) * (p >> 13) * (p >> 13)) >> 25;
+  var2_p = (((int64_t)dig_P8) * p) >> 19;
+  p = ((p + var1_p + var2_p) >> 8) + (((int64_t)dig_P7) << 4);
+  return (float)p / 256.0;
+}
+
+void setup() {
+  Wire.begin();
+  gpsSerial.begin(9600);
+  
+  LoRa.setPins(LORA_NSS, LORA_RST, LORA_DIO0);
+  if (!LoRa.begin(LORA_FREQ)) while (1);
   LoRa.setSpreadingFactor(7);
   LoRa.setSignalBandwidth(250E3);
   LoRa.setCodingRate4(5);
 
-  // Inicializa ESC e Servos
   esc.attach(escPin, 1000, 2000);
   leftElevon.attach(leftElevonPin);
   rightElevon.attach(rightElevonPin);
-
-  // Arming do ESC (1000us) e centraliza servos com seus trims
   esc.writeMicroseconds(1000);
   leftElevon.write(LEFT_CENTER);
   rightElevon.write(RIGHT_CENTER);
-  delay(2000);
+  
+  // MPU6050 Wake up
+  Wire.beginTransmission(MPU_addr);
+  Wire.write(0x6B);
+  Wire.write(0);
+  Wire.endTransmission(true);
 
-  Serial.println("Arduino LoRa Remoto pronto. 2S Li-ion (Com Telemetria).");
-  lastCommandTime = millis(); // Inicializa o timer do failsafe
+  initBMP280();
+  delay(100);
+  base_pressure = readBMP280Pressure();
+
+  lastCommandTime = millis();
 }
 
 void loop() {
-  // 1. Leitura e Filtragem Anti-Sag Extremamente Lenta (A cada 20ms)
+  readGPS();
+
   if (millis() - lastVoltageReadTime >= 20) {
     int sensorValue = analogRead(voltagePin);
-    float pinVoltage = (sensorValue / 1023.0) * referenceVoltage;
-    float currentVoltage = pinVoltage * voltageDividerFactor * VOLTAGE_CALIBRATION;
+    float currentVoltage = (sensorValue / 1023.0) * referenceVoltage * voltageDividerFactor * VOLTAGE_CALIBRATION;
 
     if (firstRead) {
       filteredVoltage = currentVoltage;
       firstRead = false;
     } else {
-      // Usamos um filtro simplificado, mas variamos a velocidade de resposta
-      float alpha;
-      if (throttle == 0) {
-        // Motor parado: atualiza relativamente rápido (aprox 1 segundo para estabilizar)
-        alpha = 0.05;
-      } else {
-        // Motor sob carga: Bateria sofre Sag. Atualizamos a média MUITO devagar.
-        // Assim a tensão refletida não cai instantaneamente (anti-sag),
-        // mas continua a cair caso a bateria descarregue de verdade ao longo dos minutos.
-        alpha = 0.0002;
-      }
+      float alpha = (throttle == 0) ? 0.05 : 0.0002;
       filteredVoltage = (filteredVoltage * (1.0 - alpha)) + (currentVoltage * alpha);
     }
     lastVoltageReadTime = millis();
   }
 
-  float batteryVoltage = filteredVoltage;
+  bool isBatteryLow = filteredVoltage < 6.0;
 
-  // 2. Estimativa de Porcentagem 2S (Min 6.0V, Max 8.4V)
-  int batteryPercent = map(batteryVoltage * 100, 600, 840, 0, 100);
-  batteryPercent = constrain(batteryPercent, 0, 100);
-
-  // 3. Status de Segurança
-  bool isBatteryLow = batteryVoltage < 6.0;
-
-  // === FAILSAFE: Desliga motor se perder conexão LoRa ===
   if (millis() - lastCommandTime > FAILSAFE_TIMEOUT) {
-    if (throttle > 0 || pitch != 0 || roll != 0) {
-      throttle = 0;
-      pitch = 0;
-      roll = 0;
+    if (throttle > 0 || pitch_cmd != 0 || roll_cmd != 0) {
+      throttle = 0; pitch_cmd = 0; roll_cmd = 0;
       esc.writeMicroseconds(1000);
       leftElevon.write(LEFT_CENTER);
       rightElevon.write(RIGHT_CENTER);
@@ -155,96 +235,79 @@ void loop() {
     failsafeActive = false;
   }
 
-  String status;
-  if (failsafeActive) {
-    status = "FAILSAFE";
-  } else if (isBatteryLow) {
-    status = "ERROR_BATTERY";
-  } else {
-    status = "OK";
-  }
-
-  // 4. Envio de Telemetria via LoRa (a cada 500ms)
   if (millis() - lastTelemetryTime > 500) {
-    String telemetry = "T:V=";
-    telemetry += String(batteryVoltage, 2);
-    telemetry += ",P=";
-    telemetry += String(batteryPercent);
-    telemetry += ",S=";
-    telemetry += status;
-    telemetry += ",AR=";
-    telemetry += String(lastCmdRssi); // RSSI do sinal ESP32->Arduino
+    // MPU6050 Pitch & Roll
+    Wire.beginTransmission(MPU_addr);
+    Wire.write(0x3B);
+    Wire.endTransmission(false);
+    Wire.requestFrom(MPU_addr, 6, true);
+    if(Wire.available() == 6) {
+      AcX = Wire.read()<<8|Wire.read();
+      AcY = Wire.read()<<8|Wire.read();
+      AcZ = Wire.read()<<8|Wire.read();
+      
+      pitch_mpu = -(atan2(AcX, sqrt((long)AcY * AcY + (long)AcZ * AcZ)) * 180.0) / PI;
+      roll_mpu = (atan2(AcY, AcZ) * 180.0) / PI;
+    }
+
+    // BMP280 Altitude
+    float press = readBMP280Pressure();
+    if (press > 0 && base_pressure > 0) {
+      bmp_altitude = 44330.0 * (1.0 - pow(press / base_pressure, 0.1903));
+    }
+
+    String status = failsafeActive ? "FAILSAFE" : (isBatteryLow ? "ERROR_BATTERY" : "OK");
+    
+    // T:V=8.4,P=100,S=OK,AR=-50,PIT=12.1,ROL=-5.2,ALT=120.1,LAT=-12.9714,LON=-38.5104
+    String telemetry = "T:V=" + String(filteredVoltage, 2) + 
+                       ",P=" + String(constrain(map(filteredVoltage * 100, 600, 840, 0, 100), 0, 100)) + 
+                       ",S=" + status + 
+                       ",AR=" + String(lastCmdRssi) + 
+                       ",PIT=" + String(pitch_mpu, 1) + 
+                       ",ROL=" + String(roll_mpu, 1) + 
+                       ",ALT=" + String(bmp_altitude, 1) + 
+                       ",LAT=" + String(gps_lat, 6) + 
+                       ",LON=" + String(gps_lon, 6);
 
     LoRa.beginPacket();
     LoRa.print(telemetry);
     LoRa.endPacket();
-
-    // Debug local (opcional)
-    Serial.println(telemetry);
+    LoRa.receive();
 
     lastTelemetryTime = millis();
   }
 
-  // 5. Recebimento de Comandos via LoRa
   int packetSize = LoRa.parsePacket();
   if (packetSize) {
     String input = "";
-    while (LoRa.available()) {
-      input += (char)LoRa.read();
-    }
+    while (LoRa.available()) input += (char)LoRa.read();
     input.trim();
-
-    // Guarda o RSSI do comando recebido (sinal ESP32 -> Arduino)
     lastCmdRssi = LoRa.packetRssi();
-    lastCommandTime = millis(); // Reseta o timer do failsafe
+    lastCommandTime = millis();
 
-    // Rotina de Calibração: Usada se o ESC não reconhecer a faixa do acelerador
     if (input == "CALIBRATE") {
-      // Envia feedback via LoRa
-      LoRa.beginPacket();
-      LoRa.print("T:V=0.00,P=0,S=CALIBRATING");
-      LoRa.endPacket();
-
-      esc.writeMicroseconds(2000); // Manda o pulso máximo
-      delay(8000); // 8 segundos para o usuário plugar a bateria e ouvir os bips
-      esc.writeMicroseconds(1000); // Retorna ao mínimo para confirmar
-
-      LoRa.beginPacket();
-      LoRa.print("T:V=0.00,P=0,S=CAL_DONE");
-      LoRa.endPacket();
+      LoRa.beginPacket(); LoRa.print("T:V=0.00,P=0,S=CALIBRATING"); LoRa.endPacket();
+      esc.writeMicroseconds(2000);
+      delay(8000);
+      esc.writeMicroseconds(1000);
+      LoRa.beginPacket(); LoRa.print("T:V=0.00,P=0,S=CAL_DONE"); LoRa.endPacket();
     } else {
-      int parsedThrottle = 0, parsedPitch = 0, parsedRoll = 0;
-      if (sscanf(input.c_str(), "%d,%d,%d", &parsedThrottle, &parsedPitch, &parsedRoll) == 3) {
-        throttle = constrain(parsedThrottle, 0, 100);
-        pitch = constrain(parsedPitch, -100, 100);
-        roll = constrain(parsedRoll, -100, 100);
+      int pT = 0, pP = 0, pR = 0;
+      if (sscanf(input.c_str(), "%d,%d,%d", &pT, &pP, &pR) == 3) {
+        throttle = constrain(pT, 0, 100);
+        pitch_cmd = constrain(pP, -100, 100);
+        roll_cmd = constrain(pR, -100, 100);
       } else {
-        // Fallback backward compatibility
         throttle = constrain(input.toInt(), 0, 100);
-        pitch = 0;
-        roll = 0;
+        pitch_cmd = 0; roll_cmd = 0;
       }
+      if (isBatteryLow) throttle = 0;
 
-      // Proteção de Subtensão (Desliga o motor se a bateria estiver crítica)
-      if (isBatteryLow) {
-        throttle = 0;
-      }
-
-      int pwmValue = 1000;
-      if (throttle > 0) {
-        // Mapeia 1 a 100 para 1040 a 2000us para compensar ESCs de baixa qualidade
-        // que têm zona morta no início (ex: só começam a girar depois de 4%).
-        pwmValue = map(throttle, 1, 100, 1040, 2000);
-      }
-
+      int pwmValue = (throttle > 0) ? map(throttle, 1, 100, 1040, 2000) : 1000;
       esc.writeMicroseconds(pwmValue);
 
-      // Mixagem de Elevons (Corrigida para Servos Fisicamente Espelhados)
-      // Pitch (Arfagem): Servos devem se mover em direções opostas (pois estão espelhados) para subir/descer juntos.
-      // Roll (Rolagem): Servos devem se mover na mesma direção para que uma asa suba e a outra desça.
-      int leftAngle = LEFT_CENTER + map(pitch, -100, 100, -45, 45) + map(roll, -100, 100, 45, -45);
-      int rightAngle = RIGHT_CENTER + map(pitch, -100, 100, 45, -45) + map(roll, -100, 100, 45, -45);
-
+      int leftAngle = LEFT_CENTER + map(pitch_cmd, -100, 100, -45, 45) + map(roll_cmd, -100, 100, 45, -45);
+      int rightAngle = RIGHT_CENTER + map(pitch_cmd, -100, 100, 45, -45) + map(roll_cmd, -100, 100, 45, -45);
       leftElevon.write(constrain(leftAngle, LEFT_MIN, LEFT_MAX));
       rightElevon.write(constrain(rightAngle, RIGHT_MIN, RIGHT_MAX));
     }
