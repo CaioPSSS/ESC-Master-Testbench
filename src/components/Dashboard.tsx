@@ -343,15 +343,117 @@ export function Dashboard({ isConnected, send, telemetry, packetCount, lastPacke
             </div>
 
           </div>
+
+          {/* LoRa Diagnostics (Moved here to fill empty space) */}
+          <div className="bg-slate-900/40 backdrop-blur-md border border-slate-800/80 p-4 rounded-xl flex-1 flex flex-col">
+            <div className="flex items-center gap-2 border-b border-slate-800/60 pb-3 mb-4">
+              <Radio className="w-4 h-4 text-amber-500" />
+              <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Link LoRa 433MHz</h3>
+              
+              <div className="flex items-center gap-1.5 ml-auto">
+                {isConnected && lastPacketTime ? (
+                  <>
+                    <div className="relative w-2 h-2 flex items-center justify-center">
+                      {!isStale && <div className="absolute inset-0 rounded-full bg-emerald-500 animate-ping-slow"></div>}
+                      <div className={`w-2 h-2 rounded-full transition-colors duration-300 relative z-10 ${isStale ? 'bg-rose-500' : 'bg-emerald-400'}`}></div>
+                    </div>
+                    <span className={`text-[9px] font-mono font-bold uppercase tracking-wider ${isStale ? 'text-rose-500' : 'text-emerald-500'}`}>
+                      {isStale ? 'STALE' : 'LIVE'}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <div className="w-2 h-2 rounded-full bg-slate-700"></div>
+                    <span className="text-[9px] font-mono font-bold uppercase tracking-wider text-slate-600">IDLE</span>
+                  </>
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-4 flex-1 flex flex-col justify-between">
+              {/* Link Quality */}
+              <div className="bg-slate-900/60 border border-slate-800/80 p-3 rounded-lg flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Gauge className="w-4 h-4 text-amber-400" />
+                  <span className="text-[10px] text-slate-400 font-bold uppercase">Qualidade</span>
+                </div>
+                {espQuality !== null ? (
+                  <div className="flex items-center gap-2">
+                    <div className="flex gap-0.5 items-end h-4">
+                      {[...Array(5)].map((_, i) => (
+                        <div
+                          key={i}
+                          className={`w-1 rounded-t-xs transition-all duration-300 ${i < Math.ceil(espQuality / 20) ? espQuality >= 70 ? 'bg-emerald-500' : espQuality >= 40 ? 'bg-amber-400' : 'bg-rose-500' : 'bg-slate-800'}`}
+                          style={{ height: `${(i + 1) * 20}%` }}
+                        ></div>
+                      ))}
+                    </div>
+                    <span className={`text-sm font-mono font-bold ${espQuality >= 70 ? 'text-emerald-400' : espQuality >= 40 ? 'text-amber-400' : 'text-rose-500'}`}>{espQuality}%</span>
+                  </div>
+                ) : (
+                  <span className="text-sm font-mono text-slate-600 font-bold">—</span>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-slate-900/60 border border-slate-800/80 p-3 rounded-lg flex flex-col justify-between">
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <Signal className="w-3.5 h-3.5 text-cyan-400" />
+                    <span className="text-[9px] text-slate-500 font-bold uppercase">RSSI (Bridge)</span>
+                  </div>
+                  <div className="flex items-end justify-between">
+                    <div className="text-base font-mono text-white font-bold leading-none">{espRssi !== null ? `${espRssi}` : '—'}</div>
+                    <span className="text-[9px] text-slate-500 font-normal">dBm</span>
+                  </div>
+                </div>
+                <div className="bg-slate-900/60 border border-slate-800/80 p-3 rounded-lg flex flex-col justify-between">
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <Signal className="w-3.5 h-3.5 text-emerald-400" />
+                    <span className="text-[9px] text-slate-500 font-bold uppercase">RSSI (Nano)</span>
+                  </div>
+                  <div className="flex items-end justify-between">
+                    <div className="text-base font-mono text-white font-bold leading-none">{ardRssi !== null ? `${ardRssi}` : '—'}</div>
+                    <span className="text-[9px] text-slate-500 font-normal">dBm</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-slate-900/60 border border-slate-800/80 p-3 rounded-lg flex flex-col justify-between">
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <Activity className="w-3.5 h-3.5 text-cyan-400" />
+                    <span className="text-[9px] text-slate-500 font-bold uppercase">SNR (Ruído)</span>
+                  </div>
+                  <div className="flex items-end justify-between">
+                    <div className="text-base font-mono text-white font-bold leading-none">
+                      {espSnr !== null ? `${espSnr > 0 ? '+' : ''}${espSnr.toFixed(1)}` : '—'}
+                    </div>
+                    <span className="text-[9px] text-slate-500 font-normal">dB</span>
+                  </div>
+                </div>
+                <div className="bg-slate-900/60 border border-slate-800/80 p-3 rounded-lg flex flex-col justify-between">
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <Radio className="w-3.5 h-3.5 text-amber-400" />
+                    <span className="text-[9px] text-slate-500 font-bold uppercase">Pacotes</span>
+                  </div>
+                  <div className="flex items-end justify-between leading-none">
+                    <div className="text-base font-mono text-white font-bold">{packetCount > 0 ? packetCount : '—'}</div>
+                    {timeSincePacket !== null && <span className={`text-[8px] font-bold ${isStale ? 'text-rose-500 animate-pulse' : 'text-slate-500'}`}>{timeSincePacket < 1000 ? `${timeSincePacket}ms` : `${(timeSincePacket / 1000).toFixed(1)}s`}</span>}
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* --- BOTTOM ROW: MAP & DIAGNOSTICS --- */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
+      {/* --- BOTTOM ROW: MAP --- */}
+      <div className="w-full animate-in fade-in slide-in-from-bottom-4 duration-300">
         
         {/* GPS Map & Status */}
-        <div className="lg:col-span-2 flex flex-col gap-4">
-          <div className="bg-slate-900/40 backdrop-blur-md border border-slate-800/80 p-4 rounded-xl flex-1 flex flex-col min-h-[300px]">
+        <div className="w-full flex flex-col gap-4">
+          <div className="bg-slate-900/40 backdrop-blur-md border border-slate-800/80 p-4 rounded-xl w-full flex flex-col min-h-[350px]">
             <div className="flex justify-between items-center mb-3">
               <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
                 <LocateFixed className="w-3.5 h-3.5 text-cyan-500" />
@@ -382,108 +484,6 @@ export function Dashboard({ isConnected, send, telemetry, packetCount, lastPacke
               )}
               <MapWidget lat={latitude} lon={longitude} />
             </div>
-          </div>
-        </div>
-
-        {/* LoRa Diagnostics */}
-        <div className="lg:col-span-1 bg-slate-900/40 backdrop-blur-md border border-slate-800/80 p-4 rounded-xl flex flex-col">
-          <div className="flex items-center gap-2 border-b border-slate-800/60 pb-3 mb-4">
-            <Radio className="w-4 h-4 text-amber-500" />
-            <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Link LoRa 433MHz</h3>
-            
-            <div className="flex items-center gap-1.5 ml-auto">
-              {isConnected && lastPacketTime ? (
-                <>
-                  <div className="relative w-2 h-2 flex items-center justify-center">
-                    {!isStale && <div className="absolute inset-0 rounded-full bg-emerald-500 animate-ping-slow"></div>}
-                    <div className={`w-2 h-2 rounded-full transition-colors duration-300 relative z-10 ${isStale ? 'bg-rose-500' : 'bg-emerald-400'}`}></div>
-                  </div>
-                  <span className={`text-[9px] font-mono font-bold uppercase tracking-wider ${isStale ? 'text-rose-500' : 'text-emerald-500'}`}>
-                    {isStale ? 'STALE' : 'LIVE'}
-                  </span>
-                </>
-              ) : (
-                <>
-                  <div className="w-2 h-2 rounded-full bg-slate-700"></div>
-                  <span className="text-[9px] font-mono font-bold uppercase tracking-wider text-slate-600">IDLE</span>
-                </>
-              )}
-            </div>
-          </div>
-
-          <div className="space-y-4 flex-1 flex flex-col justify-between">
-            {/* Link Quality */}
-            <div className="bg-slate-900/60 border border-slate-800/80 p-3 rounded-lg flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Gauge className="w-4 h-4 text-amber-400" />
-                <span className="text-[10px] text-slate-400 font-bold uppercase">Qualidade</span>
-              </div>
-              {espQuality !== null ? (
-                <div className="flex items-center gap-2">
-                  <div className="flex gap-0.5 items-end h-4">
-                    {[...Array(5)].map((_, i) => (
-                      <div
-                        key={i}
-                        className={`w-1 rounded-t-xs transition-all duration-300 ${i < Math.ceil(espQuality / 20) ? espQuality >= 70 ? 'bg-emerald-500' : espQuality >= 40 ? 'bg-amber-400' : 'bg-rose-500' : 'bg-slate-800'}`}
-                        style={{ height: `${(i + 1) * 20}%` }}
-                      ></div>
-                    ))}
-                  </div>
-                  <span className={`text-sm font-mono font-bold ${espQuality >= 70 ? 'text-emerald-400' : espQuality >= 40 ? 'text-amber-400' : 'text-rose-500'}`}>{espQuality}%</span>
-                </div>
-              ) : (
-                <span className="text-sm font-mono text-slate-600 font-bold">—</span>
-              )}
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="bg-slate-900/60 border border-slate-800/80 p-3 rounded-lg flex flex-col justify-between">
-                <div className="flex items-center gap-1.5 mb-2">
-                  <Signal className="w-3.5 h-3.5 text-cyan-400" />
-                  <span className="text-[9px] text-slate-500 font-bold uppercase">RSSI (Bridge)</span>
-                </div>
-                <div className="flex items-end justify-between">
-                  <div className="text-base font-mono text-white font-bold leading-none">{espRssi !== null ? `${espRssi}` : '—'}</div>
-                  <span className="text-[9px] text-slate-500 font-normal">dBm</span>
-                </div>
-              </div>
-              <div className="bg-slate-900/60 border border-slate-800/80 p-3 rounded-lg flex flex-col justify-between">
-                <div className="flex items-center gap-1.5 mb-2">
-                  <Signal className="w-3.5 h-3.5 text-emerald-400" />
-                  <span className="text-[9px] text-slate-500 font-bold uppercase">RSSI (Nano)</span>
-                </div>
-                <div className="flex items-end justify-between">
-                  <div className="text-base font-mono text-white font-bold leading-none">{ardRssi !== null ? `${ardRssi}` : '—'}</div>
-                  <span className="text-[9px] text-slate-500 font-normal">dBm</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="bg-slate-900/60 border border-slate-800/80 p-3 rounded-lg flex flex-col justify-between">
-                <div className="flex items-center gap-1.5 mb-2">
-                  <Activity className="w-3.5 h-3.5 text-cyan-400" />
-                  <span className="text-[9px] text-slate-500 font-bold uppercase">SNR (Ruído)</span>
-                </div>
-                <div className="flex items-end justify-between">
-                  <div className="text-base font-mono text-white font-bold leading-none">
-                    {espSnr !== null ? `${espSnr > 0 ? '+' : ''}${espSnr.toFixed(1)}` : '—'}
-                  </div>
-                  <span className="text-[9px] text-slate-500 font-normal">dB</span>
-                </div>
-              </div>
-              <div className="bg-slate-900/60 border border-slate-800/80 p-3 rounded-lg flex flex-col justify-between">
-                <div className="flex items-center gap-1.5 mb-2">
-                  <Radio className="w-3.5 h-3.5 text-amber-400" />
-                  <span className="text-[9px] text-slate-500 font-bold uppercase">Pacotes</span>
-                </div>
-                <div className="flex items-end justify-between leading-none">
-                  <div className="text-base font-mono text-white font-bold">{packetCount > 0 ? packetCount : '—'}</div>
-                  {timeSincePacket !== null && <span className={`text-[8px] font-bold ${isStale ? 'text-rose-500 animate-pulse' : 'text-slate-500'}`}>{timeSincePacket < 1000 ? `${timeSincePacket}ms` : `${(timeSincePacket / 1000).toFixed(1)}s`}</span>}
-                </div>
-              </div>
-            </div>
-
           </div>
         </div>
 
