@@ -41,11 +41,18 @@ const int leftElevonPin = 3;
 const int rightElevonPin = 5;
 const int voltagePin = A0;
 
-// Trims mecânicos dos servos (Compensação de montagem física)
-const int LEFT_TRIM = 50;   // +10 graus para asa esquerda (subiu 5 graus)
-const int RIGHT_TRIM = -58; // -18 graus para asa direita (subiu 5 graus - espelhado)
-const int LEFT_CENTER = 90 + LEFT_TRIM;
-const int RIGHT_CENTER = 90 + RIGHT_TRIM;
+// Centros Mecânicos (Ajustados fisicamente)
+const int LEFT_CENTER = 105;
+const int RIGHT_CENTER = 70;
+
+// Limites Mecânicos (Evita travamento na fuselagem)
+// Baseado no teste de Auto-Stall (Queda de Tensão) - recuados 2 graus por segurança
+const int LEFT_MIN = 46;  // (Travou em 44)
+const int LEFT_MAX = 150; // (Travou em 152)
+
+// Limites do Direito estimados pelo "throw" simétrico do esquerdo (~46 graus)
+const int RIGHT_MIN = 24; 
+const int RIGHT_MAX = 116;
 
 // Configuração do Divisor de Tensão
 // Se R1 e R2 forem iguais (ex: 8k/8k ou 10k/10k), a tensão é dividida por 2. (Fator = 2.0)
@@ -238,8 +245,8 @@ void loop() {
       int leftAngle = LEFT_CENTER + map(pitch, -100, 100, -45, 45) + map(roll, -100, 100, 45, -45);
       int rightAngle = RIGHT_CENTER + map(pitch, -100, 100, 45, -45) + map(roll, -100, 100, 45, -45);
 
-      leftElevon.write(constrain(leftAngle, 0, 180));
-      rightElevon.write(constrain(rightAngle, 0, 180));
+      leftElevon.write(constrain(leftAngle, LEFT_MIN, LEFT_MAX));
+      rightElevon.write(constrain(rightAngle, RIGHT_MIN, RIGHT_MAX));
     }
   }
 }

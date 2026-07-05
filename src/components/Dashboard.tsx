@@ -39,11 +39,9 @@ export function Dashboard({ isConnected, send, telemetry, packetCount, lastPacke
   const joystickRef = useRef<HTMLDivElement>(null);
   const lastSendTimeRef = useRef<number>(0);
 
-  // Trims de Software (evita ter que regravar o firmware do Arduino)
-  // pitch = 26 (15 para alinhar + 11 para subir 5 graus)
-  // roll = 15 (para alinhar)
-  const PITCH_TRIM = 26;
-  const ROLL_TRIM = 15;
+  // Trims de Software removidos (agora o Arduino cuida dos centros reais fisicamente)
+  const PITCH_TRIM = 0;
+  const ROLL_TRIM = 0;
 
   const handleJoystickMove = (e: React.PointerEvent) => {
     if (!isArmed || isBatteryLow) return;
