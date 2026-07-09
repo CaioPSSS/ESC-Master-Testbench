@@ -1,107 +1,157 @@
-import { useState } from 'react';
-import { Bluetooth, BluetoothOff, Settings2, Activity, Code } from 'lucide-react';
-import { useBluetooth } from './hooks/useBluetooth';
+import { useEffect, useMemo, useState } from 'react';
+import { Activity, Bluetooth, BluetoothOff, MapPinned, RadioTower, SlidersHorizontal } from 'lucide-react';
+
+import { useWebSocket } from './hooks/useWebSocket';
+import type { FlightMode } from './lib/protocol';
 import { Dashboard } from './components/Dashboard';
-import { CodeViewer } from './components/CodeViewer';
-import { WiringGuide } from './components/WiringGuide';
+import { MapWidget } from './components/MapWidget';
+import { RCGamepadTab } from './components/RCGamepadTab';
+import { TuningParamsTab } from './components/TuningParamsTab';
 
 export default function App() {
-  const { isConnected, connect, disconnect, send, error, telemetry, packetCount, lastPacketTime } = useBluetooth();
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const { connect, disconnect, error, isConnected, lastTelemetry, lastPacketTime, packetCount, sendBinary, status, url } = useWebSocket();
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'map' | 'rc' | 'tuning'>('dashboard');
+  const [armed, setArmed] = useState(false);
+  const [mode, setMode] = useState<FlightMode>(0);
+
+  useEffect(() => {
+    setArmed(lastTelemetry?.armed ?? false);
+    setMode(lastTelemetry?.mode ?? 0);
+  }, [lastTelemetry?.armed, lastTelemetry?.mode]);
+
+  const connectionLabel = useMemo(() => {
+    if (status === 'connected') return 'CONNECTED';
+    if (status === 'connecting') return 'CONNECTING';
+    if (status === 'error') return 'ERROR';
+    if (status === 'disconnected') return 'DISCONNECTED';
+    return 'IDLE';
+  }, [status]);
+
+  const telemetry = lastTelemetry;
+
+  const tabs = [
+    { id: 'dashboard' as const, label: 'Dashboard', icon: Activity },
+    { id: 'map' as const, label: 'Map Widget', icon: MapPinned },
+    { id: 'rc' as const, label: 'RC & Gamepad', icon: RadioTower },
+    { id: 'tuning' as const, label: 'Tuning & Params', icon: SlidersHorizontal },
+  ];
 
   return (
-    <div className="min-h-screen bg-slate-950 flex flex-col font-sans text-slate-300 overflow-hidden select-none">
-      
-      {/* Top Navigation / Status Bar */}
-      <header className="h-16 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-8 shrink-0">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-blue-500 rounded flex items-center justify-center text-slate-950 font-bold">M</div>
-          <h1 className="text-xl font-semibold tracking-tight text-white">ESC Pro Controller <span className="text-slate-500 font-normal text-sm ml-2">v5.0.0 BLE</span></h1>
-        </div>
-        
-        <div className="flex items-center gap-6">
-          {error && (
-            <span className="text-rose-400 text-xs font-bold uppercase tracking-widest bg-rose-500/10 px-2 py-1 rounded">
-              {error}
-            </span>
-          )}
-          
-          <div className="flex items-center gap-2">
-            {isConnected ? (
-              <Bluetooth className="w-4 h-4 text-blue-400" />
-            ) : (
-              <BluetoothOff className="w-4 h-4 text-slate-500" />
-            )}
-            <span className={`text-xs uppercase tracking-widest font-bold ${isConnected ? 'text-blue-400' : 'text-slate-500'}`}>
-              {isConnected ? 'BLE CONNECTED' : 'DISCONNECTED'}
-            </span>
-          </div>
+    <div className="min-h-screen overflow-hidden bg-slate-950 font-sans text-slate-300">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(34,211,238,0.08),_transparent_28%),radial-gradient(circle_at_bottom_right,_rgba(16,185,129,0.08),_transparent_26%)]" />
 
-          <div className="text-xs text-slate-500 border-l border-slate-800 pl-6 flex items-center gap-4">
-            {!isConnected ? (
-              <button
-                onClick={connect}
-                className="flex items-center gap-1.5 bg-blue-600/20 text-blue-400 border border-blue-500/30 px-3 py-1.5 rounded hover:bg-blue-600/30 hover:text-blue-300 transition-colors cursor-pointer font-bold tracking-wider"
-              >
-                <Bluetooth className="w-4 h-4" />
-                CONECTAR BLUETOOTH
-              </button>
-            ) : (
-              <button
-                onClick={disconnect}
-                className="flex items-center gap-1.5 bg-slate-800 text-slate-400 border border-slate-700 px-3 py-1.5 rounded hover:bg-slate-700 hover:text-rose-400 transition-colors cursor-pointer font-bold tracking-wider"
-              >
-                <BluetoothOff className="w-4 h-4" />
-                DESCONECTAR
-              </button>
-            )}
+      <div className="relative flex min-h-screen flex-col">
+        <header className="border-b border-slate-800/80 bg-slate-950/90 px-4 py-3 backdrop-blur-md lg:px-8">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              BRIDGE: <span className="text-slate-300 font-mono">ESP32_BLE_LORA</span>
+              <div className="text-[10px] font-bold uppercase tracking-[0.45em] text-cyan-400/80">GNC Ground Station</div>
+              <h1 className="mt-1 text-2xl font-semibold text-white lg:text-3xl">VANT Binary Control Surface</h1>
+              <p className="mt-1 text-sm text-slate-400">WebSocket binário para ESP32 AP, leitura de gamepad e telemetria 0xAA em tempo real.</p>
             </div>
 
-            <button
-              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded transition-all text-[10px] font-bold uppercase tracking-wider cursor-pointer border ${
-                isSidebarOpen
-                  ? 'bg-amber-500/15 border-amber-500/40 text-amber-400 shadow-[0_0_8px_rgba(245,158,11,0.15)]'
-                  : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200 hover:bg-slate-750'
-              }`}
-            >
-              <Code className="w-3.5 h-3.5" />
-              {isSidebarOpen ? 'Esconder Código' : 'Mostrar Código'}
-            </button>
+            <div className="flex flex-wrap items-center gap-3">
+              {error && <span className="rounded-full border border-rose-500/30 bg-rose-500/10 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.35em] text-rose-300">{error}</span>}
+              <div className="rounded-full border border-slate-800 bg-slate-900/80 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.35em] text-slate-400">{connectionLabel}</div>
+              <div className="rounded-full border border-slate-800 bg-slate-900/80 px-3 py-1 text-[10px] font-mono text-slate-400">{url}</div>
+              <div className="rounded-full border border-slate-800 bg-slate-900/80 px-3 py-1 text-[10px] font-mono text-slate-400">PKT {packetCount}</div>
+              {!isConnected ? (
+                <button
+                  onClick={() => connect()}
+                  className="inline-flex items-center gap-2 rounded-full border border-cyan-500/30 bg-cyan-500/10 px-4 py-2 text-[10px] font-bold uppercase tracking-[0.35em] text-cyan-200 transition-colors hover:bg-cyan-500/20"
+                >
+                  <Bluetooth className="h-3.5 w-3.5" />
+                  Connect
+                </button>
+              ) : (
+                <button
+                  onClick={disconnect}
+                  className="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900 px-4 py-2 text-[10px] font-bold uppercase tracking-[0.35em] text-slate-300 transition-colors hover:border-rose-500/30 hover:text-rose-200"
+                >
+                  <BluetoothOff className="h-3.5 w-3.5" />
+                  Disconnect
+                </button>
+              )}
+            </div>
           </div>
-        </div>
-      </header>
 
-      {/* Main Control Dashboard */}
-      <main className="flex-1 flex overflow-hidden relative">
-        
-        {/* Left Panel: Controls & Telemetry */}
-        <div className="flex-1 border-r border-slate-800 p-5 flex flex-col gap-5 overflow-y-auto min-w-[320px]">
-          <Dashboard isConnected={isConnected} send={send} telemetry={telemetry} packetCount={packetCount} lastPacketTime={lastPacketTime} />
-          <WiringGuide />
-        </div>
+          <nav className="mt-5 flex flex-wrap gap-2">
+            {tabs.map((tab) => {
+              const Icon = tab.icon;
+              const active = activeTab === tab.id;
 
-        {/* Right Panel: Logic & Documentation (Retrátil) */}
-        <div 
-          className={`shrink-0 bg-slate-900/30 flex flex-col overflow-y-auto transition-all duration-300 ease-in-out border-l border-slate-800
-            ${isSidebarOpen ? 'w-[460px] p-6 opacity-100' : 'w-0 p-0 border-l-0 opacity-0 pointer-events-none'}`}
-        >
-          <CodeViewer />
-        </div>
-        
-      </main>
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-xs font-bold uppercase tracking-[0.3em] transition-colors ${active ? 'border-cyan-400/40 bg-cyan-400/10 text-cyan-200 shadow-[0_0_18px_rgba(34,211,238,0.12)]' : 'border-slate-800 bg-slate-900/80 text-slate-400 hover:border-slate-600 hover:text-slate-200'}`}
+                >
+                  <Icon className="h-3.5 w-3.5" />
+                  {tab.label}
+                </button>
+              );
+            })}
+          </nav>
+        </header>
 
-      {/* Footer Info Bar */}
-      <footer className="h-10 bg-slate-900 border-t border-slate-800 px-8 flex items-center justify-between shrink-0">
-        <div className="text-[10px] text-slate-500 font-medium">
-          LOG: [{new Date().toLocaleTimeString()}] {isConnected ? 'BLE BRIDGE READY' : 'WAITING FOR BLUETOOTH PAIRING'}
-        </div>
-        <div className="text-[10px] text-slate-600">
-          SISTEMA DE TESTE DE BANCADA • BLE + LORA • AEROMODELISMO DIY
-        </div>
-      </footer>
+        <main className="relative flex-1 overflow-y-auto px-4 py-5 lg:px-8">
+          {activeTab === 'dashboard' && <Dashboard isConnected={isConnected} telemetry={telemetry} packetCount={packetCount} lastPacketTime={lastPacketTime} />}
+
+          {activeTab === 'map' && (
+            <section className="grid gap-6 lg:grid-cols-[1fr_0.6fr]">
+              <div className="rounded-xl border border-slate-800/80 bg-slate-900/40 p-6 backdrop-blur-md">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <div className="text-[10px] font-bold uppercase tracking-[0.35em] text-slate-500">Live Map</div>
+                    <h2 className="mt-1 text-2xl font-semibold text-white">MapWidget</h2>
+                    <p className="mt-2 text-sm text-slate-400">Posição, trilha e leitura de GPS em tempo real.</p>
+                  </div>
+                  <MapPinned className="h-5 w-5 text-emerald-400" />
+                </div>
+
+                <div className="mt-5 overflow-hidden rounded-xl border border-slate-800">
+                  <MapWidget lat={telemetry?.lat ?? -12.9714} lon={telemetry?.lon ?? -38.5104} />
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <InfoPanel title="GPS Snapshot" value={`${(telemetry?.lat ?? 0).toFixed(6)}, ${(telemetry?.lon ?? 0).toFixed(6)}`} />
+                <InfoPanel title="Altitude" value={`${(telemetry?.altitude ?? 0).toFixed(1)} m`} />
+                <InfoPanel title="Ground Speed" value={`${(telemetry?.groundSpeed ?? 0).toFixed(2)} m/s`} />
+                <InfoPanel title="Satellites" value={`${telemetry?.sats ?? 0}`} />
+              </div>
+            </section>
+          )}
+
+          {activeTab === 'rc' && (
+            <RCGamepadTab
+              armed={armed}
+              mode={mode}
+              isConnected={isConnected}
+              sendBinary={sendBinary}
+              onArmChange={setArmed}
+              onModeChange={setMode}
+            />
+          )}
+
+          {activeTab === 'tuning' && <TuningParamsTab sendBinary={sendBinary} />}
+        </main>
+
+        <footer className="border-t border-slate-800/80 bg-slate-950/90 px-4 py-3 text-[10px] uppercase tracking-[0.35em] text-slate-500 lg:px-8">
+          <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+            <div>WS {connectionLabel} • {new Date().toLocaleTimeString()} • {packetCount} packets</div>
+            <div>SSID VANT_GCS • Password admin • Binary little-endian control path</div>
+          </div>
+        </footer>
+      </div>
+    </div>
+  );
+}
+
+function InfoPanel({ title, value }: { title: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-slate-800/80 bg-slate-900/40 p-5 backdrop-blur-md">
+      <div className="text-[10px] font-bold uppercase tracking-[0.35em] text-slate-500">{title}</div>
+      <div className="mt-2 font-mono text-lg text-white">{value}</div>
     </div>
   );
 }

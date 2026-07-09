@@ -1,87 +1,116 @@
 # Project Context & Agent Instructions
 
 ## Overview
-This is a **React + TypeScript + Vite** web application that acts as a wireless control dashboard for a brushless motor (A2212 1000KV) and Elevon servos. It uses a **Bluetooth Low Energy (BLE) + LoRa 433MHz** wireless architecture: the ESP32 creates a BLE Server (Nordic UART Service). Any PC or phone connects via Web Bluetooth in the browser. The ESP32 relays commands wirelessly via **LoRa** to a remote **Arduino Uno/Nano (ATmega328PB)** that drives the ESC and servos, and sends battery telemetry and full avionics data (MPU6050, BMP280, NEO6MV2) back.
+This repository is a **React 19 + TypeScript + Vite** ground station for a UAV. The current control path is no longer BLE/text. The browser reads a physical controller with the **HTML5 Gamepad API**, sends **binary WebSocket** packets to an ESP32 access point, and receives **binary telemetry** back.
+
+The ESP32 bridge acts as a **transparent FreeRTOS pass-through** between WebSocket and LoRa. It does not parse payload contents. The remote flight controller remains an **Arduino ATmega328PB** board that handles motor, servos, sensors, and NMEA parsing.
+
+## Current Architecture
+
+```text
+[GameSir Nova Lite / other gamepad]
+                    |
+                    | Bluetooth nativo no Android / tablet
+                    v
+[Browser React GCS]
+                    |
+                    | Gamepad API + WebSocket binário
+                    | ws://192.168.4.1/ws
+                    v
+[ESP32 DevKit V1 - AP VANT_GCS]
+                    |
+                    | FreeRTOS bridge, AsyncWebServer + AsyncTCP
+                    | LoRa SX1278 Ra-02 433 MHz
+                    v
+[Arduino ATmega328PB remoto]
+                    |
+                    +-- ESC PWM D6
+                    +-- Elevon esquerdo D3
+                    +-- Elevon direito D5
+                    +-- A0 leitura de bateria com divisor 1:1
+                    +-- MPU6050 + BMP280 no I2C
+                    +-- NEO6MV2 via SoftwareSerial
+```
 
 ## Tech Stack
-- **Framework**: React 19 + TypeScript 5.8
-- **Build Tool**: Vite 6 (dev on port 3000, `npm run dev`)
-- **Styling**: TailwindCSS v4 (via `@tailwindcss/vite` plugin — **NOT v3**)
-- **Icons**: lucide-react
-- **Fonts/Aesthetic**: Dark slate/cyberpunk palette (Tailwind `slate`, `emerald`, `amber`, `rose`, `cyan`)
+- **Framework**: React 19
+- **Language**: TypeScript 5.8
+- **Build**: Vite 6
+- **Styling**: TailwindCSS v4 via `@tailwindcss/vite`
+- **Icons**: `lucide-react`
+- **Map**: `leaflet` + `react-leaflet`
+- **Aesthetic**: dark slate HUD, neon cyan/emerald accents, glassmorphism, mono fonts for critical values
 
-## Hardware Architecture
+## Important Source Files
+- `src/App.tsx` orchestrates the tabbed shell and connection state.
+- `src/components/Dashboard.tsx` is read-only telemetry, attitude, and link health.
+- `src/components/RCGamepadTab.tsx` handles controller state, virtual arm/mode controls, and RC packet sending.
+- `src/components/TuningParamsTab.tsx` edits and sends 0xDD tuning packets.
+- `src/components/MapWidget.tsx` renders the live map.
+- `src/hooks/useWebSocket.ts` manages the binary socket connection, reconnection, telemetry parsing, and sendBinary.
+- `src/hooks/useGamepad.ts` polls `navigator.getGamepads()` in a requestAnimationFrame loop.
+- `src/lib/protocol.ts` owns packet builders and parsers for the binary protocol.
+- `esp32_lora_bridge/esp32_lora_bridge.ino` is the ESP32 FreeRTOS bridge.
+- `arduino_lora_remote/arduino_lora_remote.ino` is the remote flight controller.
 
-```
-[Phone / PC (Chrome/Edge)]
-     |  Web Bluetooth (BLE UART)
-     |  Service: 6E400001-...
-     v
-[ESP32 DevKit V1]  <- BLE Server + LoRa Bridge
-     |                 LoRa SX1278 Ra-02 433MHz
-     |                 ~~~ 433MHz wireless ~~~
-     v
-[Arduino Nano (ATmega328PB)]  <->  [LoRa SX1278 Ra-02 433MHz]
-     |
-     +-- [ESC <- PWM Pin 6]
-     +-- [Elevon Left <- PWM Pin 3]
-     +-- [Elevon Right <- PWM Pin 5]
-     +-- [Battery A0 (Voltage Divider 1:1)]
-     +-- [I2C: MPU6050 (Attitude) + BMP280 (Altitude) no A4/A5]
-     +-- [UART: NEO6MV2 (GPS) via SoftwareSerial no D4/D7]
-     +-- [Motor A2212 1000KV]
-     +-- [2S 18650 Li-ion Pack]
-```
+## Binary Protocol
+The protocol is strict little-endian binary. Use `DataView` for all packing and unpacking. Do not reintroduce text parsing for control or telemetry.
 
-## Key Components and Logic
+### Uplink
+- `0xBB` RC packet, 9 bytes total
+     - `[u8 header] [i16 roll] [i16 pitch] [u16 throttle] [u8 mode] [u8 arm]`
+     - Gamepad axes are normalized from `-1.0` to `1.0` and multiplied by `1000` with `Math.trunc()` before packing.
+- `0xCC` mission upload, 14 bytes total
+     - `[u8 header] [u8 index] [i32 lat*1e7] [i32 lon*1e7] [i16 alt_dm] [u16 speed_cms]`
+- `0xDD` tuning packet, 6 bytes total
+     - `[u8 header] [u8 paramId] [f32 value]`
 
-### 1. Motor & Servo Control
-- The UI slider sends a throttle percentage (0-100%). The 2D Joystick sends pitch and roll (-100 to 100).
-- The Arduino code maps throttle to a PWM signal (1000us to 2000us) on **pin 6** (NOT pin 9 -- pin 9 is used by LoRa NRESET).
-- **Dead Zone Compensation**: To account for low-quality ESCs that don't start spinning immediately, the throttle map for values > 0 starts at `1040us` instead of 1000us.
-- **Elevon Clipping & Centers**: The left and right servos are physically mirrored. Their exact centers (`105` and `70`) and mechanical limits (`[46, 150]` and `[24, 116]`) are hardcoded in the Arduino to prevent physical stall against the fuselage. The UI sends raw (-100 to 100) and the Arduino applies the Delta Mix and constrains it.
+### Downlink
+- `0xAA` telemetry packet, 26 bytes total
+     - Roll, pitch, yaw, altitude, battery, lat, lon, sats, mode, armed, failsafe, RSSI, ground speed
 
-### 2. Battery Telemetry & Anti-Sag Filter
-- Voltage is read via analog pin A0 using a 1:1 voltage divider (R1=R2, e.g., 10k/10k or 8k/8k), dividing the 8.4V max by 2 to stay within Arduino's 5V limit.
-- **Voltage Sag Issue**: When a large load is applied to the motor, the battery voltage physically drops (voltage sag).
-- **Anti-Sag Filter**: A dynamic Exponential Moving Average (EMA) filter is implemented in the Arduino C++ code to prevent false low-battery alarms:
-  - When `throttle == 0` (no load): `alpha = 0.05` (updates quickly to show true resting voltage).
-  - When `throttle > 0` (under load): `alpha = 0.0002` (updates extremely slowly, effectively "holding" the voltage value).
+## Frontend Rules
+- Keep the UI tabbed. The current tabs are `Dashboard`, `Map Widget`, `RC & Gamepad`, and `Tuning & Params`.
+- Do not re-add the removed legacy tabs `Code Viewer` or `Wiring Guide`.
+- Do not reintroduce `useBluetooth.ts`, BLE UART UUIDs, or text command strings.
+- Do not add software trims for pitch or roll in the UI. The Arduino owns elevon centering and limits.
+- Keep the dashboard as a read-only telemetry surface. Control actions belong in the RC/Gamepad tab.
+- Keep the dark HUD look and the glass panels. Do not switch to a flat or light UI.
+- Use monospace presentation for packet values, IDs, voltages, coordinates, and telemetry fields.
 
-### 3. BLE Protocol & NMEA Parser
-- **Outbound (Browser -> ESP32 via BLE)**: Raw throttle, pitch, and roll followed by newline, e.g., `45,80,-20\n`. Special command: `CALIBRATE\n` ou `TEST\n`.
-- **Inbound (Arduino -> ESP32 via LoRa -> Browser via BLE)**: Prefixed key-value format. The Arduino sends base telemetry via LoRa, and the ESP32 appends radio metrics before broadcasting via BLE Notify.
-  - **Full format**: `T:V=7.80,P=50,S=OK,AR=-52,PIT=1.2,ROL=-5.0,ALT=12.5,LAT=-12.9,LON=-38.5,SAT=8,FIX=1,CRS=180.5,R=-45,N=9.5`
-  - Parsed in `src/hooks/useBluetooth.ts`. Keys are converted to lowercase.
-- **NMEA Parser (Arduino)**: Não utilizamos bibliotecas pesadas de GPS (como TinyGPS++) devido a extrema falta de memória RAM (2KB). O código em `arduino_lora_remote.ino` faz um parse 'bare-metal' das sentenças `$GPGGA` (Satélites, Fix) e `$GPRMC` (Latitude, Longitude e Track Angle/Course).
-- Telemetry is sent every 500ms from the Arduino via LoRa.
-- The `useBluetooth` hook auto-reconnects and tracks `packetCount` and `lastPacketTime`.
+## ESP32 Bridge Rules
+- The ESP32 must stay in **AP mode** with SSID `VANT_GCS` and password `admin` unless the task explicitly says otherwise.
+- The WebSocket endpoint is `/ws`.
+- The ESP32 bridge must remain transparent: no parsing of control or telemetry fields, only byte forwarding.
+- Use `ESPAsyncWebServer` and `AsyncTCP` with FreeRTOS tasks/queues for the split between network and radio work.
+- Keep LoRa on `#include <LoRa.h>` from Sandeep Mistry.
+- Do not raise BLE power or reintroduce BLE on the ESP32 bridge.
 
-### 4. Failsafe System (Dual-Layer)
-The system has **two independent failsafe layers** to stop the motor if the wireless connection is lost:
+## Arduino Flight Controller Rules
+- The remote Arduino is **ATmega328PB**, not a standard Nano target.
+- Use the **MiniCore** board package when flashing or building sketches for that board.
+- Keep ESC PWM on **D6**. Do not move it back to D9.
+- D9 remains reserved for LoRa NRESET.
+- Keep the elevon servo pins at **D3** and **D5**.
+- Do not add heavy libraries such as `TinyGPS++` or `Adafruit_BMP280`; use bare-metal parsing and lightweight I2C.
+- Preserve the existing anti-sag EMA structure and alpha values unless the task explicitly asks for changes.
+- Preserve the existing failsafe timing values unless explicitly requested.
 
-1. **Arduino Hardware Failsafe** (in Arduino code):
-   - Tracks `lastCommandTime`. If `throttle > 0` and no command received for **2 seconds** (`FAILSAFE_TIMEOUT = 2000`), the Arduino zeroes throttle and centers servos.
-   - Reports `S=FAILSAFE` in telemetry.
+## Safety and Behavior Rules
+- Do not change the board type or pin assignments casually.
+- Do not add compass logic based on MPU6050; it does not provide magnetometer data.
+- Do not replace raw telemetry parsing with JSON or text protocols.
+- Maintain the existing radio and power constraints of the hardware stack.
 
-2. **Dashboard Software Failsafe** (in `Dashboard.tsx`):
-   - If the motor is armed and `timeSincePacket > 3000ms`, the Dashboard auto-disarms and zeroes throttle.
+## Build and Validation
+- Frontend dev server: `npm run dev`
+- Frontend typecheck: `npm run lint`
+- Frontend production build: `npm run build`
+- Prefer small, local edits and validate the touched slice immediately.
+- If a change touches the protocol, validate both the packet builders and the consumers.
 
-### 5. UI Guidelines
-- **Dashboard** (`src/components/Dashboard.tsx`): A interface é construída em um Layout Single-Screen (sem abas) organizado em Grid, estilo HSI (Horizontal Situation Indicator). O lado esquerdo é focado em Controle, o lado direito em Atitude/Altitude, e a barra inferior focada em Navegação GPS e Qualidade de Sinal.
-- **Glassmorphism & Glow**: All cards use a glass-like `bg-slate-900/40 backdrop-blur-md` style. The throttle has dynamic shadows that shift from amber to red based on intensity.
-- **Auto-disarm**: Dashboard auto-disarms and zeroes throttle if telemetry reports `S=ERROR_BATTERY`, `S=FAILSAFE`, or goes stale for 3+ seconds.
-- **MCU Status States**: `OFFLINE` → `FAILSAFE` → `CORTE ATIVO` → `SEM SINAL` → `NORMAL` → `NO TELEMETRY`.
-
-## Future Agents Rules
-- **Do NOT** change the Arduino board type standard. The remote Arduino uses an **ATmega328PB** chip. When flashing bootloader or sketches, it MUST use the **MiniCore** package in Arduino IDE. Standard Nano boards will fail the signature check (`1E 95 16`).
-- **Do NOT** boost the BLE power in the ESP32 (`BLEDevice::setPower(ESP_PWR_LVL_P9)`). The combined power spike of LoRa + BLE will cause a brownout bootloop on standard USB ports.
-- **Do NOT** add software trims for Pitch and Roll in the UI (`Dashboard.tsx`). The physical centers and constraints are hardcoded in the Arduino to allow for Elevon Clipping. The UI must send pure `[-100, 100]` values.
-- **Do NOT** tentar criar uma Bússola magnética. O sensor **GY-521 (MPU6050)** só possui Acelerômetro e Giroscópio. Para renderizar a bússola `CompassWidget.tsx`, nós dependemos do **Track Angle** (Curso sobre o solo) lido da string NMEA `$GPRMC` do módulo GPS, que só indica o Norte com precisão enquanto o modelo estiver em movimento.
-- **Do NOT** tentar instalar bibliotecas grandes como `Adafruit_BMP280` ou `TinyGPS++` no Arduino. Elas estouram a memória de 2KB SRAM. Use funções *bare-metal* I2C (`Wire.h`) e parsers raw.
-- **Do NOT** change the `alpha` values (`0.05` / `0.0002`) or the anti-sag filter structure unless requested.
-- **Do NOT** change the ESC PWM pin from **D6** back to D9 -- D9 is occupied by the LoRa NRESET line.
-- **Do NOT** change the failsafe timeout values (`FAILSAFE_TIMEOUT = 2000ms` on Arduino, `3000ms` on Dashboard) unless requested.
-- Always maintain the dark slate/cyberpunk aesthetic (Tailwind `slate`, `emerald`, `amber`, `rose`, `cyan`).
-- This project uses **TailwindCSS v4**. Do NOT use v3 syntax (`tailwind.config.js`, `@apply`, `theme()` in config, etc.).
-- The LoRa library used is **LoRa.h by Sandeep Mistry** (`#include <LoRa.h>`).
+## Working Style
+- Make minimal, focused edits.
+- Prefer root-cause fixes over surface patches.
+- Do not remove unrelated user changes.
+- Keep comments short and only where behavior is not obvious.
