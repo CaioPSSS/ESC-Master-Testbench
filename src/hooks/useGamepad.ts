@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 
-import type { GamepadButtons, GamepadAxes, ParsedGamepadState } from '../lib/protocol';
+import { applyDeadzone, type GamepadButtons, type GamepadAxes, type ParsedGamepadState } from '../lib/protocol';
 
 const EMPTY_BUTTONS: GamepadButtons = {
   a: false,
@@ -42,10 +42,10 @@ function readButton(gamepad: Gamepad, index: number): boolean {
 }
 
 function buildState(gamepad: Gamepad): ParsedGamepadState {
-  const leftX = clampAxis(gamepad.axes[0]);
+  const leftX = applyDeadzone(clampAxis(gamepad.axes[0]));
   const leftY = clampAxis(gamepad.axes[1]);
-  const rightX = clampAxis(gamepad.axes[2]);
-  const rightY = clampAxis(gamepad.axes[3]);
+  const rightX = applyDeadzone(clampAxis(gamepad.axes[2]));
+  const rightY = applyDeadzone(clampAxis(gamepad.axes[3]));
 
   return {
     connected: true,

@@ -72,6 +72,10 @@ export const PARAMETER_NAMES = [
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
+export function applyDeadzone(value: number, threshold = 0.05): number {
+  return Math.abs(value) < threshold ? 0 : value;
+}
+
 export function parseTelemetry(buffer: ArrayBuffer): TelemetryData | null {
   const view = new DataView(buffer);
 

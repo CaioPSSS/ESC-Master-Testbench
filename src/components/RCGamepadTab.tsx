@@ -1,14 +1,13 @@
 import { useEffect, useRef } from 'react';
 import { Armchair, Gamepad2, Power, RotateCcw, SatelliteDish, ShieldAlert } from 'lucide-react';
 
-import { buildRcPacket, type FlightMode } from '../lib/protocol';
-import { useGamepad } from '../hooks/useGamepad';
+import type { FlightMode, ParsedGamepadState } from '../lib/protocol';
 
 interface RCGamepadTabProps {
   armed: boolean;
   mode: FlightMode;
   isConnected: boolean;
-  sendBinary: (buffer: ArrayBuffer) => boolean;
+  gamepad: ParsedGamepadState;
   onArmChange: (armed: boolean) => void;
   onModeChange: (mode: FlightMode) => void;
 }
@@ -29,8 +28,7 @@ function formatThrottle(throttle: number): string {
   return `${Math.round(throttle)} / 1000`;
 }
 
-export function RCGamepadTab({ armed, mode, isConnected, sendBinary, onArmChange, onModeChange }: RCGamepadTabProps) {
-  const gamepad = useGamepad();
+export function RCGamepadTab({ armed, mode, isConnected, gamepad, onArmChange, onModeChange }: RCGamepadTabProps) {
   const previousButtonsRef = useRef(gamepad.buttons);
 
   useEffect(() => {
@@ -39,51 +37,34 @@ export function RCGamepadTab({ armed, mode, isConnected, sendBinary, onArmChange
     if (gamepad.buttons.start && !previousButtons.start) {
       const nextArmed = !armed;
       onArmChange(nextArmed);
-      sendBinary(buildRcPacket(gamepad.axes, mode, nextArmed));
     }
 
     if (gamepad.buttons.b && !previousButtons.b) {
       onModeChange(4);
-      sendBinary(buildRcPacket(gamepad.axes, 4, armed));
     }
 
     if (gamepad.buttons.a && !previousButtons.a) {
       onModeChange(0);
-      sendBinary(buildRcPacket(gamepad.axes, 0, armed));
     }
 
     if (gamepad.buttons.x && !previousButtons.x) {
       onModeChange(1);
-      sendBinary(buildRcPacket(gamepad.axes, 1, armed));
     }
 
     if (gamepad.buttons.y && !previousButtons.y) {
       onModeChange(3);
-      sendBinary(buildRcPacket(gamepad.axes, 3, armed));
     }
 
     previousButtonsRef.current = gamepad.buttons;
-  }, [armed, gamepad.axes, gamepad.buttons, mode, onArmChange, onModeChange, sendBinary]);
-
-  useEffect(() => {
-    const intervalId = window.setInterval(() => {
-      sendBinary(buildRcPacket(gamepad.axes, mode, armed));
-    }, 100);
-
-    return () => {
-      window.clearInterval(intervalId);
-    };
-  }, [armed, gamepad.axes, mode, sendBinary]);
+  }, [armed, gamepad.buttons, onArmChange, onModeChange]);
 
   const handleArmToggle = () => {
     const nextArmed = !armed;
     onArmChange(nextArmed);
-    sendBinary(buildRcPacket(gamepad.axes, mode, nextArmed));
   };
 
   const handleModeSelect = (nextMode: FlightMode) => {
     onModeChange(nextMode);
-    sendBinary(buildRcPacket(gamepad.axes, nextMode, armed));
   };
 
   return (

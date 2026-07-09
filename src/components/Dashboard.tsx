@@ -6,6 +6,7 @@ import { AttitudeIndicator } from './AttitudeIndicator';
 
 interface DashboardProps {
   isConnected: boolean;
+  telemetryLost?: boolean;
   telemetry?: TelemetryData | null;
   packetCount: number;
   lastPacketTime: number | null;
@@ -32,7 +33,7 @@ function modeLabel(mode: number): string {
   }
 }
 
-export function Dashboard({ isConnected, telemetry, packetCount, lastPacketTime }: DashboardProps) {
+export function Dashboard({ isConnected, telemetryLost = false, telemetry, packetCount, lastPacketTime }: DashboardProps) {
   const [timeSincePacket, setTimeSincePacket] = useState<number | null>(null);
 
   useEffect(() => {
@@ -55,11 +56,12 @@ export function Dashboard({ isConnected, telemetry, packetCount, lastPacketTime 
   const isStale = timeSincePacket !== null && timeSincePacket > 2000;
   const statusLabel = useMemo(() => {
     if (!isConnected) return 'OFFLINE';
+    if (telemetryLost) return 'TELEMETRY LOST';
     if (isFailsafe) return 'FAILSAFE';
     if (isStale) return 'SEM SINAL';
     if (isArmed) return 'NORMAL';
     return 'NO TELEMETRY';
-  }, [isArmed, isConnected, isFailsafe, isStale]);
+  }, [isArmed, isConnected, isFailsafe, isStale, telemetryLost]);
 
   const latitude = telemetry?.lat ?? -12.9714;
   const longitude = telemetry?.lon ?? -38.5104;
@@ -81,9 +83,9 @@ export function Dashboard({ isConnected, telemetry, packetCount, lastPacketTime 
                 Painel principal com telemetria binária, atitude do voo e consciência situacional do enlace.
               </p>
             </div>
-            <div className={`rounded-lg border px-3 py-2 text-right ${isConnected ? 'border-emerald-500/30 bg-emerald-500/10' : 'border-slate-700 bg-slate-950/60'}`}>
+            <div className={`rounded-lg border px-3 py-2 text-right ${telemetryLost ? 'border-rose-500/30 bg-rose-500/10' : isConnected ? 'border-emerald-500/30 bg-emerald-500/10' : 'border-slate-700 bg-slate-950/60'}`}>
               <div className="text-[10px] uppercase tracking-[0.3em] text-slate-500">MCU</div>
-              <div className={`mt-1 text-sm font-bold ${isConnected ? 'text-emerald-400' : 'text-slate-500'}`}>{statusLabel}</div>
+              <div className={`mt-1 text-sm font-bold ${telemetryLost ? 'text-rose-400 animate-pulse' : isConnected ? 'text-emerald-400' : 'text-slate-500'}`}>{statusLabel}</div>
             </div>
           </div>
 
@@ -106,7 +108,7 @@ export function Dashboard({ isConnected, telemetry, packetCount, lastPacketTime 
               <div className="mt-4 flex justify-center">
                 <AttitudeIndicator pitch={pitch} roll={roll} />
               </div>
-              <div className="mt-4 grid grid-cols-2 gap-3 text-xs text-slate-400">
+                <div className={`mt-4 grid grid-cols-2 gap-3 text-xs text-slate-400 ${telemetryLost ? 'animate-pulse' : ''}`}>
                 <MiniStat label="Pitch" value={`${pitch.toFixed(2)}°`} />
                 <MiniStat label="Roll" value={`${roll.toFixed(2)}°`} />
               </div>
@@ -148,7 +150,7 @@ export function Dashboard({ isConnected, telemetry, packetCount, lastPacketTime 
         </article>
 
         <aside className="space-y-4">
-          <div className="rounded-xl border border-slate-800/80 bg-slate-900/40 p-5 backdrop-blur-md">
+              <div className={`rounded-xl border border-slate-800/80 bg-slate-900/40 p-5 backdrop-blur-md ${telemetryLost ? 'ring-1 ring-rose-500/30' : ''}`}>
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-[10px] font-bold uppercase tracking-[0.3em] text-slate-500">Link State</div>
@@ -164,17 +166,17 @@ export function Dashboard({ isConnected, telemetry, packetCount, lastPacketTime 
             </div>
           </div>
 
-          <div className="rounded-xl border border-slate-800/80 bg-slate-900/40 p-5 backdrop-blur-md">
+              <div className={`rounded-xl border border-slate-800/80 bg-slate-900/40 p-5 backdrop-blur-md ${telemetryLost ? 'ring-1 ring-rose-500/30' : ''}`}>
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-[10px] font-bold uppercase tracking-[0.3em] text-slate-500">Flight Safety</div>
                 <div className="mt-1 text-lg font-semibold text-white">MCU State</div>
               </div>
-              <AlertTriangle className={`h-5 w-5 ${isFailsafe ? 'text-amber-400' : isStale ? 'text-rose-400' : 'text-emerald-400'}`} />
+              <AlertTriangle className={`h-5 w-5 ${telemetryLost ? 'text-rose-400' : isFailsafe ? 'text-amber-400' : isStale ? 'text-rose-400' : 'text-emerald-400'}`} />
             </div>
             <div className="mt-4 rounded-lg border border-slate-800 bg-slate-950/70 px-4 py-3">
               <div className="text-[10px] uppercase tracking-[0.3em] text-slate-500">Status</div>
-              <div className={`mt-1 text-lg font-semibold ${isConnected ? 'text-white' : 'text-slate-500'}`}>{statusLabel}</div>
+              <div className={`mt-1 text-lg font-semibold ${telemetryLost ? 'text-rose-400' : isConnected ? 'text-white' : 'text-slate-500'}`}>{statusLabel}</div>
             </div>
             <div className="mt-4 grid grid-cols-2 gap-3 text-xs text-slate-400">
               <MiniStat label="Armed" value={isArmed ? 'YES' : 'NO'} />

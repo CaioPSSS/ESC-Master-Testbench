@@ -7,6 +7,7 @@ type WebSocketStatus = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'e
 export function useWebSocket(initialUrl: string = DEFAULT_WS_URL) {
   const socketRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<number | null>(null);
+  const telemetryTimeoutRef = useRef<number | null>(null);
   const shouldReconnectRef = useRef(true);
   const urlRef = useRef(initialUrl);
 
@@ -15,6 +16,7 @@ export function useWebSocket(initialUrl: string = DEFAULT_WS_URL) {
   const [lastTelemetry, setLastTelemetry] = useState<TelemetryData | null>(null);
   const [packetCount, setPacketCount] = useState(0);
   const [lastPacketTime, setLastPacketTime] = useState<number | null>(null);
+  const [isTelemetryLost, setIsTelemetryLost] = useState(false);
 
   const clearReconnectTimer = useCallback(() => {
     if (reconnectTimerRef.current !== null) {
@@ -23,9 +25,24 @@ export function useWebSocket(initialUrl: string = DEFAULT_WS_URL) {
     }
   }, []);
 
+  const clearTelemetryTimeout = useCallback(() => {
+    if (telemetryTimeoutRef.current !== null) {
+      window.clearTimeout(telemetryTimeoutRef.current);
+      telemetryTimeoutRef.current = null;
+    }
+  }, []);
+
+  const armTelemetryTimeout = useCallback(() => {
+    clearTelemetryTimeout();
+    telemetryTimeoutRef.current = window.setTimeout(() => {
+      setIsTelemetryLost(true);
+    }, 1500);
+  }, [clearTelemetryTimeout]);
+
   const disconnect = useCallback(() => {
     shouldReconnectRef.current = false;
     clearReconnectTimer();
+    clearTelemetryTimeout();
 
     if (socketRef.current) {
       socketRef.current.onopen = null;
@@ -37,6 +54,7 @@ export function useWebSocket(initialUrl: string = DEFAULT_WS_URL) {
     }
 
     setStatus('disconnected');
+    setIsTelemetryLost(false);
   }, [clearReconnectTimer]);
 
   const connect = useCallback((nextUrl?: string) => {
@@ -55,6 +73,7 @@ export function useWebSocket(initialUrl: string = DEFAULT_WS_URL) {
 
     setStatus('connecting');
     setError(null);
+    setIsTelemetryLost(false);
 
     const socket = new WebSocket(targetUrl);
     socket.binaryType = 'arraybuffer';
@@ -80,6 +99,8 @@ export function useWebSocket(initialUrl: string = DEFAULT_WS_URL) {
         setLastTelemetry(telemetry);
         setPacketCount((previous) => previous + 1);
         setLastPacketTime(Date.now());
+        setIsTelemetryLost(false);
+        armTelemetryTimeout();
       }
     };
 
@@ -90,6 +111,7 @@ export function useWebSocket(initialUrl: string = DEFAULT_WS_URL) {
 
     socket.onclose = () => {
       socketRef.current = null;
+      clearTelemetryTimeout();
 
       if (shouldReconnectRef.current) {
         setStatus('connecting');
@@ -123,6 +145,14 @@ export function useWebSocket(initialUrl: string = DEFAULT_WS_URL) {
     };
   }, [connect, disconnect]);
 
+  useEffect(() => {
+    if (!isTelemetryLost) {
+      return;
+    }
+
+    clearTelemetryTimeout();
+  }, [clearTelemetryTimeout, isTelemetryLost]);
+
   return {
     connect,
     disconnect,
@@ -130,6 +160,7 @@ export function useWebSocket(initialUrl: string = DEFAULT_WS_URL) {
     isConnected: status === 'connected',
     lastPacketTime,
     lastTelemetry,
+    isTelemetryLost,
     packetCount,
     sendBinary,
     status,
