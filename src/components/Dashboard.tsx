@@ -3,6 +3,7 @@ import { Activity, AlertTriangle, BatteryCharging, Crosshair, Globe2, Radio, Sat
 
 import type { TelemetryData } from '../lib/protocol';
 import { AttitudeIndicator } from './AttitudeIndicator';
+import { CompassWidget } from './CompassWidget';
 
 interface DashboardProps {
   isConnected: boolean;
@@ -100,17 +101,19 @@ export function Dashboard({ isConnected, telemetryLost = false, telemetry, packe
             <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <div className="text-[10px] font-bold uppercase tracking-[0.3em] text-slate-500">Attitude</div>
-                  <div className="mt-1 text-lg font-semibold text-white">Artificial Horizon</div>
+                  <div className="text-[10px] font-bold uppercase tracking-[0.3em] text-slate-500">Attitude & Direction</div>
+                  <div className="mt-1 text-lg font-semibold text-white">Horizon & Compass</div>
                 </div>
                 <Crosshair className="h-5 w-5 text-cyan-400" />
               </div>
-              <div className="mt-4 flex justify-center">
+              <div className="mt-4 flex flex-col sm:flex-row items-center justify-around gap-6">
                 <AttitudeIndicator pitch={pitch} roll={roll} />
+                <CompassWidget heading={telemetry?.yaw ?? 0} />
               </div>
-                <div className={`mt-4 grid grid-cols-2 gap-3 text-xs text-slate-400 ${telemetryLost ? 'animate-pulse' : ''}`}>
+              <div className={`mt-4 grid grid-cols-3 gap-3 text-xs text-slate-400 ${telemetryLost ? 'animate-pulse' : ''}`}>
                 <MiniStat label="Pitch" value={`${pitch.toFixed(2)}°`} />
                 <MiniStat label="Roll" value={`${roll.toFixed(2)}°`} />
+                <MiniStat label="Yaw" value={`${(telemetry?.yaw ?? 0).toFixed(1)}°`} />
               </div>
             </div>
 

@@ -14,10 +14,11 @@ type MainToWorkerMessage =
 
 type WorkerToMainMessage =
   | { type: 'request-gamepad' }
-  | { type: 'send-binary'; buffer: ArrayBuffer };
+  | { type: 'send-binary'; buffer: ArrayBuffer }
+  | { type: 'throttle-update'; value: number };
 
 type WorkerScope = {
-  postMessage(message: WorkerToMainMessage, transfer: Transferable[]): void;
+  postMessage(message: WorkerToMainMessage, transfer?: Transferable[]): void;
 };
 
 let config: RcWorkerConfig = {
@@ -77,9 +78,16 @@ self.onmessage = (event: MessageEvent<MainToWorkerMessage>) => {
   const message = event.data;
 
   if (message.type === 'configure') {
+    const wasArmed = config.armed;
     config = message.config;
     awaitingSnapshot = false;
     nextTickAt = performance.now() + RC_TICK_MS;
+
+    // Reset throttle on disarm or deactivation (safety)
+    if (!config.active || (!config.armed && wasArmed)) {
+      currentThrottle = 0;
+      (globalThis as unknown as WorkerScope).postMessage({ type: 'throttle-update', value: currentThrottle });
+    }
 
     if (config.active) {
       scheduleNextTick();
@@ -111,5 +119,6 @@ self.onmessage = (event: MessageEvent<MainToWorkerMessage>) => {
     const buffer = buildRcPacket(axesWithThrottle, config.mode, config.armed);
     const outbound: WorkerToMainMessage = { type: 'send-binary', buffer };
     (globalThis as unknown as WorkerScope).postMessage(outbound, [buffer]);
+    (globalThis as unknown as WorkerScope).postMessage({ type: 'throttle-update', value: currentThrottle });
   }
 };

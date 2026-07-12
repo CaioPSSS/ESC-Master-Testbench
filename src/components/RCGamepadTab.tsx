@@ -10,6 +10,7 @@ interface RCGamepadTabProps {
   gamepad: ParsedGamepadState;
   onArmChange: (armed: boolean) => void;
   onModeChange: (mode: FlightMode) => void;
+  workerThrottle?: number;
 }
 
 const MODES: Array<{ value: FlightMode; label: string; accent: string }> = [
@@ -28,7 +29,7 @@ function formatThrottle(throttle: number): string {
   return `${Math.round(throttle)} / 1000`;
 }
 
-export function RCGamepadTab({ armed, mode, isConnected, gamepad, onArmChange, onModeChange }: RCGamepadTabProps) {
+export function RCGamepadTab({ armed, mode, isConnected, gamepad, onArmChange, onModeChange, workerThrottle }: RCGamepadTabProps) {
   const previousButtonsRef = useRef(gamepad.buttons);
 
   useEffect(() => {
@@ -92,12 +93,12 @@ export function RCGamepadTab({ armed, mode, isConnected, gamepad, onArmChange, o
         <div className="grid gap-4 md:grid-cols-3">
           <AxisCard label="Roll" value={gamepad.axes.roll} accent="cyan" />
           <AxisCard label="Pitch" value={gamepad.axes.pitch} accent="emerald" />
-          <AxisCard label="Throttle" value={gamepad.axes.throttle / 1000} accent="amber" throttleValue={gamepad.axes.throttle} />
+          <AxisCard label="Throttle" value={(workerThrottle ?? gamepad.axes.throttle) / 1000} accent="amber" throttleValue={workerThrottle ?? gamepad.axes.throttle} />
         </div>
 
         <div className="grid gap-4 md:grid-cols-2">
           <VirtualStickPanel title="Stick Direito" subtitle="Roll / Pitch" xValue={gamepad.axes.rightX} yValue={gamepad.axes.rightY} />
-          <VirtualStickPanel title="Stick Esquerdo" subtitle="Throttle / Aux" xValue={gamepad.axes.leftX} yValue={gamepad.axes.leftY} throttleLabel={formatThrottle(gamepad.axes.throttle)} />
+          <VirtualStickPanel title="Stick Esquerdo" subtitle="Throttle / Aux" xValue={gamepad.axes.leftX} yValue={gamepad.axes.leftY} throttleLabel={formatThrottle(workerThrottle ?? gamepad.axes.throttle)} />
         </div>
 
         <div className="flex flex-wrap gap-3">

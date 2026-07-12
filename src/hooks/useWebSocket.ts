@@ -10,6 +10,7 @@ export function useWebSocket(initialUrl: string = DEFAULT_WS_URL) {
   const telemetryTimeoutRef = useRef<number | null>(null);
   const shouldReconnectRef = useRef(true);
   const urlRef = useRef(initialUrl);
+  const reconnectDelayRef = useRef(1000); // S-10: Exponential backoff delay starting at 1s
 
   const [status, setStatus] = useState<WebSocketStatus>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -81,6 +82,7 @@ export function useWebSocket(initialUrl: string = DEFAULT_WS_URL) {
     socket.onopen = () => {
       setStatus('connected');
       setError(null);
+      reconnectDelayRef.current = 1000; // S-10: Reset backoff on success
     };
 
     socket.onmessage = async (event) => {
@@ -115,9 +117,12 @@ export function useWebSocket(initialUrl: string = DEFAULT_WS_URL) {
 
       if (shouldReconnectRef.current) {
         setStatus('connecting');
+        const delay = reconnectDelayRef.current;
+        // S-10: Double delay up to max 10s
+        reconnectDelayRef.current = Math.min(delay * 2, 10000);
         reconnectTimerRef.current = window.setTimeout(() => {
           connect(targetUrl);
-        }, 1200);
+        }, delay);
       } else {
         setStatus('disconnected');
       }

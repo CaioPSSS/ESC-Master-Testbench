@@ -17,12 +17,19 @@ export default function App() {
   const [armed, setArmed] = useState(false);
   const [mode, setMode] = useState<FlightMode>(0);
 
-  // Permite enviar comandos sempre que houver conexão WS com o Bridge
   const canSendToVant = isConnected;
   const telemetry = lastTelemetry;
   const connectedToVant = canSendToVant;
 
-  useRcWorker({
+  const [homePos, setHomePos] = useState<{lat: number; lon: number} | null>(null);
+
+  useEffect(() => {
+    if (!homePos && telemetry?.sats && telemetry.sats > 0 && telemetry.lat !== 0) {
+      setHomePos({ lat: telemetry.lat, lon: telemetry.lon });
+    }
+  }, [telemetry?.lat, telemetry?.lon, telemetry?.sats, homePos]);
+
+  const workerThrottle = useRcWorker({
     armed,
     canSend: canSendToVant,
     gamepad,
@@ -123,7 +130,7 @@ export default function App() {
                 </div>
 
                 <div className="mt-5 overflow-hidden rounded-xl border border-slate-800">
-                  <MapWidget lat={telemetry?.lat ?? 0} lon={telemetry?.lon ?? 0} homeLat={telemetry?.lat ?? 0} homeLon={telemetry?.lon ?? 0} />
+                  <MapWidget lat={telemetry?.lat ?? 0} lon={telemetry?.lon ?? 0} homeLat={homePos?.lat ?? telemetry?.lat ?? 0} homeLon={homePos?.lon ?? telemetry?.lon ?? 0} />
                 </div>
               </div>
 
@@ -144,6 +151,7 @@ export default function App() {
               gamepad={gamepad}
               onArmChange={setArmed}
               onModeChange={setMode}
+              workerThrottle={workerThrottle}
             />
           )}
 

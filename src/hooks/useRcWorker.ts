@@ -1,10 +1,11 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import type { FlightMode, ParsedGamepadState } from '../lib/protocol';
 
 type RcWorkerToMainMessage =
   | { type: 'request-gamepad' }
-  | { type: 'send-binary'; buffer: ArrayBuffer };
+  | { type: 'send-binary'; buffer: ArrayBuffer }
+  | { type: 'throttle-update'; value: number };
 
 interface UseRcWorkerParams {
   armed: boolean;
@@ -15,6 +16,7 @@ interface UseRcWorkerParams {
 }
 
 export function useRcWorker({ armed, canSend, gamepad, mode, sendBinary }: UseRcWorkerParams) {
+  const [workerThrottle, setWorkerThrottle] = useState(0);
   const workerRef = useRef<Worker | null>(null);
   const gamepadRef = useRef(gamepad);
 
@@ -36,6 +38,10 @@ export function useRcWorker({ armed, canSend, gamepad, mode, sendBinary }: UseRc
 
       if (message.type === 'send-binary') {
         sendBinary(message.buffer);
+      }
+
+      if (message.type === 'throttle-update') {
+        setWorkerThrottle(message.value);
       }
     };
 
@@ -59,4 +65,6 @@ export function useRcWorker({ armed, canSend, gamepad, mode, sendBinary }: UseRc
       },
     });
   }, [armed, canSend, mode]);
+
+  return workerThrottle;
 }
