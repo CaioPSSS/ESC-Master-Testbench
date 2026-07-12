@@ -24,7 +24,8 @@
 
 #define WS_PATH "/ws"
 #define MAX_PACKET_SIZE 128
-#define LORA_TASK_HZ 100
+
+static constexpr uint32_t LORA_QUEUE_WAIT_MS = 5;
 
 struct BinaryPacket {
   uint16_t length;
@@ -34,9 +35,23 @@ struct BinaryPacket {
 AsyncWebServer server(80);
 AsyncWebSocket webSocket(WS_PATH);
 QueueHandle_t outgoingQueue;
+SemaphoreHandle_t loraIrqSem;
 TaskHandle_t radioTaskHandle = nullptr;
 
 static bool loraReady = false;
+static volatile uint32_t droppedPackets = 0;
+
+void IRAM_ATTR onLoraDio0Rise() {
+  BaseType_t higherPriorityTaskWoken = pdFALSE;
+
+  if (loraIrqSem) {
+    xSemaphoreGiveFromISR(loraIrqSem, &higherPriorityTaskWoken);
+  }
+
+  if (higherPriorityTaskWoken == pdTRUE) {
+    portYIELD_FROM_ISR();
+  }
+}
 
 void enqueuePacket(const uint8_t *data, size_t length) {
   if (!outgoingQueue || !data || length == 0) {
@@ -46,7 +61,11 @@ void enqueuePacket(const uint8_t *data, size_t length) {
   BinaryPacket packet = {};
   packet.length = static_cast<uint16_t>(min(length, static_cast<size_t>(MAX_PACKET_SIZE)));
   memcpy(packet.data, data, packet.length);
-  xQueueSend(outgoingQueue, &packet, 0);
+
+  if (xQueueSend(outgoingQueue, &packet, pdMS_TO_TICKS(LORA_QUEUE_WAIT_MS)) != pdTRUE) {
+    droppedPackets++;
+    Serial.printf("[Queue] drop=%lu len=%u\n", static_cast<unsigned long>(droppedPackets), packet.length);
+  }
 }
 
 void onWebSocketEvent(AsyncWebSocket *serverRef, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len) {
@@ -73,12 +92,9 @@ void onWebSocketEvent(AsyncWebSocket *serverRef, AsyncWebSocketClient *client, A
 }
 
 void radioTask(void *parameter) {
-  const TickType_t period = pdMS_TO_TICKS(1000 / LORA_TASK_HZ);
-  TickType_t lastWakeTime = xTaskGetTickCount();
-
   for (;;) {
     if (loraReady) {
-      if (digitalRead(LORA_DIO0) == HIGH) {
+      if (xSemaphoreTake(loraIrqSem, portMAX_DELAY) == pdTRUE) {
         const int packetSize = LoRa.parsePacket();
         if (packetSize > 0) {
           BinaryPacket packet = {};
@@ -95,7 +111,7 @@ void radioTask(void *parameter) {
       }
 
       BinaryPacket outgoing = {};
-      if (xQueueReceive(outgoingQueue, &outgoing, 0) == pdTRUE) {
+      while (xQueueReceive(outgoingQueue, &outgoing, 0) == pdTRUE) {
         LoRa.idle();
         LoRa.beginPacket();
         LoRa.write(outgoing.data, outgoing.length);
@@ -103,8 +119,6 @@ void radioTask(void *parameter) {
         LoRa.receive();
       }
     }
-
-    vTaskDelayUntil(&lastWakeTime, period);
   }
 }
 
@@ -116,28 +130,34 @@ void setupLoRa() {
     Serial.println("[LoRa] init failed");
     loraReady = false;
     return;
-  }
+      if (!loraReady) {
+        vTaskDelay(pdMS_TO_TICKS(50));
+        continue;
+      }
 
-  LoRa.setTxPower(17);
-  LoRa.setSpreadingFactor(7);
-  LoRa.setSignalBandwidth(250E3);
-  LoRa.setCodingRate4(5);
-  LoRa.receive();
-  loraReady = true;
-  Serial.println("[LoRa] ready");
-}
+      if (xSemaphoreTake(loraIrqSem, portMAX_DELAY) == pdTRUE) {
+        const int packetSize = LoRa.parsePacket();
+        if (packetSize > 0) {
+          BinaryPacket packet = {};
+          packet.length = static_cast<uint16_t>(min(packetSize, MAX_PACKET_SIZE));
 
-void setupWiFi() {
-  WiFi.mode(WIFI_AP);
+          for (uint16_t index = 0; index < packet.length && LoRa.available(); ++index) {
+            packet.data[index] = static_cast<uint8_t>(LoRa.read());
   WiFi.softAP(WIFI_SSID, WIFI_PASSWORD);
   Serial.print("[WiFi] AP IP: ");
-  Serial.println(WiFi.softAPIP());
-}
 
-void setupWebSocket() {
-  webSocket.onEvent(onWebSocketEvent);
-  server.addHandler(&webSocket);
+          if (webSocket.count() > 0) {
+            webSocket.binaryAll(packet.data, packet.length);
+          }
+        }
 
+        BinaryPacket outgoing = {};
+        while (xQueueReceive(outgoingQueue, &outgoing, 0) == pdTRUE) {
+          LoRa.idle();
+          LoRa.beginPacket();
+          LoRa.write(outgoing.data, outgoing.length);
+          LoRa.endPacket();
+          LoRa.receive();
   server.on("/health", HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send(200, "application/json", "{\"ok\":true,\"bridge\":\"VANT_GCS\"}");
   });
@@ -154,6 +174,7 @@ void setup() {
   delay(250);
 
   outgoingQueue = xQueueCreate(16, sizeof(BinaryPacket));
+  loraIrqSem = xSemaphoreCreateBinary();
 
   setupLoRa();
   setupWiFi();

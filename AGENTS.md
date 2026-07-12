@@ -1,9 +1,9 @@
 # Project Context & Agent Instructions
 
 ## Overview
-This repository is a **React 19 + TypeScript + Vite** ground station for a UAV. The current control path is no longer BLE/text. The browser reads a physical controller with the **HTML5 Gamepad API**, sends **binary WebSocket** packets to an ESP32 access point, and receives **binary telemetry** back.
+This repository is a **React 19 + TypeScript + Vite** ground station for a UAV. The current control path is no longer BLE/text. The browser reads a physical controller with the **HTML5 Gamepad API**, uses a dedicated **Web Worker** to pace RC uplink packets, sends **binary WebSocket** packets to an ESP32 access point, and receives **binary telemetry** back.
 
-The ESP32 bridge acts as a **transparent FreeRTOS pass-through** between WebSocket and LoRa. It does not parse payload contents. The remote flight controller remains an **Arduino ATmega328PB** board that handles motor, servos, sensors, and NMEA parsing.
+The ESP32 bridge acts as a **transparent FreeRTOS pass-through** between WebSocket and LoRa. It does not parse payload contents. The LoRa RX path is interrupt-driven on DIO0; TX bursts are queued with bounded wait and explicit drop accounting. The remote flight controller remains an **Arduino ATmega328PB** board that handles motor, servos, sensors, and NMEA parsing.
 
 ## Current Architecture
 
@@ -14,12 +14,13 @@ The ESP32 bridge acts as a **transparent FreeRTOS pass-through** between WebSock
                     v
 [Browser React GCS]
                     |
-                    | Gamepad API + WebSocket binário
+                    | Gamepad API + Web Worker de RC + WebSocket binário
                     | ws://192.168.4.1/ws
                     v
 [ESP32 DevKit V1 - AP VANT_GCS]
                     |
                     | FreeRTOS bridge, AsyncWebServer + AsyncTCP
+                    | DIO0 interrupt, semáforo ISR, fila com drop accounting
                     | LoRa SX1278 Ra-02 433 MHz
                     v
 [Arduino ATmega328PB remoto]
@@ -49,12 +50,15 @@ The ESP32 bridge acts as a **transparent FreeRTOS pass-through** between WebSock
 - `src/components/MapWidget.tsx` renders the live map.
 - `src/hooks/useWebSocket.ts` manages the binary socket connection, reconnection, telemetry parsing, and sendBinary.
 - `src/hooks/useGamepad.ts` polls `navigator.getGamepads()` in a requestAnimationFrame loop.
-- `src/lib/protocol.ts` owns packet builders and parsers for the binary protocol.
-- `esp32_lora_bridge/esp32_lora_bridge.ino` is the ESP32 FreeRTOS bridge.
+- `src/hooks/useRcWorker.ts` wires the gamepad snapshot stream into the RC worker.
+- `src/hooks/rcWorker.ts` paces RC uplink at 10 Hz on a dedicated worker thread.
+- `src/lib/protocol.ts` owns packet builders, parsers, and shared binary offsets for the protocol.
+- `esp32_lora_bridge/esp32_lora_bridge.ino` is the ESP32 FreeRTOS bridge with DIO0 IRQ handling.
 - `arduino_lora_remote/arduino_lora_remote.ino` is the remote flight controller.
 
 ## Binary Protocol
 The protocol is strict little-endian binary. Use `DataView` for all packing and unpacking. Do not reintroduce text parsing for control or telemetry.
+Keep packet offsets centralized in `src/lib/protocol.ts`; do not hardcode byte offsets in components or hooks.
 
 ### Uplink
 - `0xBB` RC packet, 9 bytes total
@@ -83,6 +87,8 @@ The protocol is strict little-endian binary. Use `DataView` for all packing and 
 - The WebSocket endpoint is `/ws`.
 - The ESP32 bridge must remain transparent: no parsing of control or telemetry fields, only byte forwarding.
 - Use `ESPAsyncWebServer` and `AsyncTCP` with FreeRTOS tasks/queues for the split between network and radio work.
+- Prefer DIO0 hardware interrupts plus a semaphore over polling for LoRa RX.
+- When enqueueing outbound radio packets, use a short bounded wait and track drops explicitly rather than silently discarding packets.
 - Keep LoRa on `#include <LoRa.h>` from Sandeep Mistry.
 - Do not raise BLE power or reintroduce BLE on the ESP32 bridge.
 
@@ -108,6 +114,7 @@ The protocol is strict little-endian binary. Use `DataView` for all packing and 
 - Frontend production build: `npm run build`
 - Prefer small, local edits and validate the touched slice immediately.
 - If a change touches the protocol, validate both the packet builders and the consumers.
+- If a change touches RC uplink timing, validate the worker path in addition to the packet builder.
 
 ## Working Style
 - Make minimal, focused edits.

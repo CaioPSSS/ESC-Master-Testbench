@@ -54,6 +54,36 @@ export interface ParsedGamepadState {
 
 export const DEFAULT_WS_URL = 'ws://192.168.4.1/ws';
 
+export const RC_PACKET_HEADER = 0xBB;
+export const RC_PACKET_LENGTH = 9;
+export const RC_PACKET_OFFSETS = {
+  header: 0,
+  roll: 1,
+  pitch: 3,
+  throttle: 5,
+  mode: 7,
+  armed: 8,
+} as const;
+
+export const TELEMETRY_PACKET_HEADER = 0xAA;
+export const TELEMETRY_PACKET_LENGTH = 26;
+export const TELEMETRY_OFFSETS = {
+  header: 0,
+  roll: 1,
+  pitch: 3,
+  yaw: 5,
+  altitude: 7,
+  battery: 9,
+  lat: 11,
+  lon: 15,
+  sats: 19,
+  mode: 20,
+  armed: 21,
+  failsafe: 22,
+  rssi: 23,
+  groundSpeed: 24,
+} as const;
+
 export const PARAMETER_NAMES = [
   'ROLL_KP',
   'ROLL_KI',
@@ -79,37 +109,37 @@ export function applyDeadzone(value: number, threshold = 0.05): number {
 export function parseTelemetry(buffer: ArrayBuffer): TelemetryData | null {
   const view = new DataView(buffer);
 
-  if (view.byteLength < 26 || view.getUint8(0) !== 0xAA) {
+  if (view.byteLength < TELEMETRY_PACKET_LENGTH || view.getUint8(TELEMETRY_OFFSETS.header) !== TELEMETRY_PACKET_HEADER) {
     return null;
   }
 
   return {
-    roll: view.getInt16(1, true) / 100,
-    pitch: view.getInt16(3, true) / 100,
-    yaw: view.getInt16(5, true) / 100,
-    altitude: view.getInt16(7, true) / 10,
-    vbat: view.getUint16(9, true) / 100,
-    lat: view.getInt32(11, true) / 1e7,
-    lon: view.getInt32(15, true) / 1e7,
-    sats: view.getUint8(19),
-    mode: view.getUint8(20) as FlightMode,
-    armed: view.getUint8(21) === 1,
-    failsafe: view.getUint8(22),
-    rssi: view.getInt8(23),
-    groundSpeed: view.getUint16(24, true) / 100,
+    roll: view.getInt16(TELEMETRY_OFFSETS.roll, true) / 100,
+    pitch: view.getInt16(TELEMETRY_OFFSETS.pitch, true) / 100,
+    yaw: view.getInt16(TELEMETRY_OFFSETS.yaw, true) / 100,
+    altitude: view.getInt16(TELEMETRY_OFFSETS.altitude, true) / 10,
+    vbat: view.getUint16(TELEMETRY_OFFSETS.battery, true) / 100,
+    lat: view.getInt32(TELEMETRY_OFFSETS.lat, true) / 1e7,
+    lon: view.getInt32(TELEMETRY_OFFSETS.lon, true) / 1e7,
+    sats: view.getUint8(TELEMETRY_OFFSETS.sats),
+    mode: view.getUint8(TELEMETRY_OFFSETS.mode) as FlightMode,
+    armed: view.getUint8(TELEMETRY_OFFSETS.armed) === 1,
+    failsafe: view.getUint8(TELEMETRY_OFFSETS.failsafe),
+    rssi: view.getInt8(TELEMETRY_OFFSETS.rssi),
+    groundSpeed: view.getUint16(TELEMETRY_OFFSETS.groundSpeed, true) / 100,
   };
 }
 
 export function buildRcPacket(axes: Pick<GamepadAxes, 'roll' | 'pitch' | 'throttle'>, mode: number, armed: boolean): ArrayBuffer {
-  const buffer = new ArrayBuffer(9);
+  const buffer = new ArrayBuffer(RC_PACKET_LENGTH);
   const view = new DataView(buffer);
 
-  view.setUint8(0, 0xBB);
-  view.setInt16(1, Math.trunc(clamp(axes.roll, -1, 1) * 1000), true);
-  view.setInt16(3, Math.trunc(clamp(axes.pitch, -1, 1) * 1000), true);
-  view.setUint16(5, clamp(Math.trunc(axes.throttle), 0, 1000), true);
-  view.setUint8(7, clamp(Math.trunc(mode), 0, 255));
-  view.setUint8(8, armed ? 1 : 0);
+  view.setUint8(RC_PACKET_OFFSETS.header, RC_PACKET_HEADER);
+  view.setInt16(RC_PACKET_OFFSETS.roll, Math.trunc(clamp(axes.roll, -1, 1) * 1000), true);
+  view.setInt16(RC_PACKET_OFFSETS.pitch, Math.trunc(clamp(axes.pitch, -1, 1) * 1000), true);
+  view.setUint16(RC_PACKET_OFFSETS.throttle, clamp(Math.trunc(axes.throttle), 0, 1000), true);
+  view.setUint8(RC_PACKET_OFFSETS.mode, clamp(Math.trunc(mode), 0, 255));
+  view.setUint8(RC_PACKET_OFFSETS.armed, armed ? 1 : 0);
 
   return buffer;
 }

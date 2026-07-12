@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Activity, Bluetooth, BluetoothOff, MapPinned, RadioTower, SlidersHorizontal } from 'lucide-react';
 
-import { buildRcPacket } from './lib/protocol';
 import { useGamepad } from './hooks/useGamepad';
+import { useRcWorker } from './hooks/useRcWorker';
 import { useWebSocket } from './hooks/useWebSocket';
 import type { FlightMode } from './lib/protocol';
 import { Dashboard } from './components/Dashboard';
@@ -13,7 +13,6 @@ import { TuningParamsTab } from './components/TuningParamsTab';
 export default function App() {
   const { connect, disconnect, error, isConnected, isTelemetryLost, lastTelemetry, lastPacketTime, packetCount, sendBinary, status, url } = useWebSocket();
   const gamepad = useGamepad();
-  const latestGamepadRef = useRef(gamepad);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'map' | 'rc' | 'tuning'>('dashboard');
   const [armed, setArmed] = useState(false);
   const [mode, setMode] = useState<FlightMode>(0);
@@ -22,28 +21,18 @@ export default function App() {
   const telemetry = lastTelemetry;
   const connectedToVant = canSendToVant;
 
-  useEffect(() => {
-    latestGamepadRef.current = gamepad;
-  }, [gamepad]);
+  useRcWorker({
+    armed,
+    canSend: canSendToVant,
+    gamepad,
+    mode,
+    sendBinary,
+  });
 
   useEffect(() => {
     setArmed(lastTelemetry?.armed ?? false);
     setMode(lastTelemetry?.mode ?? 0);
   }, [lastTelemetry?.armed, lastTelemetry?.mode]);
-
-  useEffect(() => {
-    if (!canSendToVant) {
-      return;
-    }
-
-    const uplinkTimer = window.setInterval(() => {
-      sendBinary(buildRcPacket(latestGamepadRef.current.axes, mode, armed));
-    }, 100);
-
-    return () => {
-      window.clearInterval(uplinkTimer);
-    };
-  }, [armed, canSendToVant, mode, sendBinary]);
 
   const connectionLabel = useMemo(() => {
     if (status === 'connected') return 'CONNECTED';

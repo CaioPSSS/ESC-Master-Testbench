@@ -205,7 +205,7 @@ function VirtualStickPanel({ title, subtitle, xValue, yValue, throttleLabel }: {
         <KeyValueRow label="X" value={xValue.toFixed(2)} />
         <KeyValueRow label="Y" value={yValue.toFixed(2)} />
         <KeyValueRow label="Throttle" value={throttleLabel ?? 'N/A'} />
-        <KeyValueRow label="Mode Hint" value="100 Hz" />
+        <KeyValueRow label="Mode Hint" value="10 Hz" />
       </div>
     </div>
   );
