@@ -43,7 +43,7 @@ function readButton(gamepad: Gamepad, index: number): boolean {
 
 function buildState(gamepad: Gamepad): ParsedGamepadState {
   const leftX = applyDeadzone(clampAxis(gamepad.axes[0]));
-  const leftY = clampAxis(gamepad.axes[1]);
+  const leftY = applyDeadzone(clampAxis(gamepad.axes[1]));
   const rightX = applyDeadzone(clampAxis(gamepad.axes[2]));
   const rightY = applyDeadzone(clampAxis(gamepad.axes[3]));
 
@@ -54,7 +54,7 @@ function buildState(gamepad: Gamepad): ParsedGamepadState {
     axes: {
       roll: rightX,
       pitch: -rightY,
-      throttle: Math.max(0, Math.min(1000, Math.trunc(((1 - leftY) / 2) * 1000))),
+      throttle: 0, // Rate-based, managed by rcWorker
       leftX,
       leftY,
       rightX,

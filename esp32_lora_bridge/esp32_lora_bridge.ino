@@ -1,7 +1,7 @@
 /*
  * GNC Ground Station — ESP32 Binary WebSocket <-> LoRa Bridge
  *
- * Wi-Fi: Access Point VANT_GCS / admin
+ * Wi-Fi: Access Point VANT_GCS / vant#Sec24
  * WebSocket: /ws
  * Rádio: SX1278 Ra-02 433MHz
  * Transporte: binário puro, little-endian, sem parsing de payload.
@@ -20,12 +20,13 @@
 #define LORA_FREQ 433E6
 
 #define WIFI_SSID "VANT_GCS"
-#define WIFI_PASSWORD "admin"
+#define WIFI_PASSWORD "vant#Sec24"
 
 #define WS_PATH "/ws"
 #define MAX_PACKET_SIZE 128
 
 static constexpr uint32_t LORA_QUEUE_WAIT_MS = 5;
+static constexpr uint32_t LORA_RX_TIMEOUT_MS = 50;
 
 struct BinaryPacket {
   uint16_t length;
@@ -93,73 +94,85 @@ void onWebSocketEvent(AsyncWebSocket *serverRef, AsyncWebSocketClient *client, A
 
 void radioTask(void *parameter) {
   for (;;) {
-    if (loraReady) {
-      if (xSemaphoreTake(loraIrqSem, portMAX_DELAY) == pdTRUE) {
-        const int packetSize = LoRa.parsePacket();
-        if (packetSize > 0) {
-          BinaryPacket packet = {};
-          packet.length = static_cast<uint16_t>(min(packetSize, MAX_PACKET_SIZE));
+    if (!loraReady) {
+      vTaskDelay(pdMS_TO_TICKS(100));
+      continue;
+    }
 
-          for (uint16_t index = 0; index < packet.length && LoRa.available(); ++index) {
-            packet.data[index] = static_cast<uint8_t>(LoRa.read());
-          }
+    // RX: Wait for DIO0 interrupt with timeout (prevents TX starvation)
+    bool gotPacket = (xSemaphoreTake(loraIrqSem, pdMS_TO_TICKS(LORA_RX_TIMEOUT_MS)) == pdTRUE);
 
-          if (webSocket.count() > 0) {
-            webSocket.binaryAll(packet.data, packet.length);
-          }
+    if (gotPacket) {
+      const int packetSize = LoRa.parsePacket();
+      if (packetSize > 0) {
+        BinaryPacket packet = {};
+        packet.length = static_cast<uint16_t>(min(packetSize, MAX_PACKET_SIZE));
+
+        for (uint16_t index = 0; index < packet.length && LoRa.available(); ++index) {
+          packet.data[index] = static_cast<uint8_t>(LoRa.read());
+        }
+
+        if (webSocket.count() > 0) {
+          webSocket.binaryAll(packet.data, packet.length);
         }
       }
+    }
 
-      BinaryPacket outgoing = {};
-      while (xQueueReceive(outgoingQueue, &outgoing, 0) == pdTRUE) {
-        LoRa.idle();
-        LoRa.beginPacket();
-        LoRa.write(outgoing.data, outgoing.length);
-        LoRa.endPacket();
-        LoRa.receive();
-      }
+    // TX: Always drain outgoing queue (even if no RX packet arrived)
+    BinaryPacket outgoing = {};
+    while (xQueueReceive(outgoingQueue, &outgoing, 0) == pdTRUE) {
+      LoRa.idle();
+      LoRa.beginPacket();
+      LoRa.write(outgoing.data, outgoing.length);
+      LoRa.endPacket();
+      LoRa.receive();
     }
   }
 }
 
 void setupLoRa() {
-  pinMode(LORA_DIO0, INPUT);
   LoRa.setPins(LORA_NSS, LORA_RST, LORA_DIO0);
 
   if (!LoRa.begin(LORA_FREQ)) {
     Serial.println("[LoRa] init failed");
     loraReady = false;
     return;
-      if (!loraReady) {
-        vTaskDelay(pdMS_TO_TICKS(50));
-        continue;
-      }
+  }
 
-      if (xSemaphoreTake(loraIrqSem, portMAX_DELAY) == pdTRUE) {
-        const int packetSize = LoRa.parsePacket();
-        if (packetSize > 0) {
-          BinaryPacket packet = {};
-          packet.length = static_cast<uint16_t>(min(packetSize, MAX_PACKET_SIZE));
+  // RF config — MUST match FlightControl (125kHz, SF7, CR4/5)
+  LoRa.setTxPower(17);
+  LoRa.setSpreadingFactor(7);
+  LoRa.setSignalBandwidth(125E3);  // Match FlightControl BW
+  LoRa.setCodingRate4(5);
+  LoRa.enableCrc();                // Match FlightControl CRC
+  LoRa.receive();
 
-          for (uint16_t index = 0; index < packet.length && LoRa.available(); ++index) {
-            packet.data[index] = static_cast<uint8_t>(LoRa.read());
+  // Attach hardware interrupt for RX indication
+  pinMode(LORA_DIO0, INPUT);
+  attachInterrupt(digitalPinToInterrupt(LORA_DIO0), onLoraDio0Rise, RISING);
+
+  loraReady = true;
+  Serial.println("[LoRa] ready — 433MHz, SF7, BW125, CRC on");
+}
+
+void setupWiFi() {
+  WiFi.mode(WIFI_AP);
   WiFi.softAP(WIFI_SSID, WIFI_PASSWORD);
   Serial.print("[WiFi] AP IP: ");
+  Serial.println(WiFi.softAPIP());
+}
 
-          if (webSocket.count() > 0) {
-            webSocket.binaryAll(packet.data, packet.length);
-          }
-        }
+void setupWebSocket() {
+  webSocket.onEvent(onWebSocketEvent);
+  server.addHandler(&webSocket);
 
-        BinaryPacket outgoing = {};
-        while (xQueueReceive(outgoingQueue, &outgoing, 0) == pdTRUE) {
-          LoRa.idle();
-          LoRa.beginPacket();
-          LoRa.write(outgoing.data, outgoing.length);
-          LoRa.endPacket();
-          LoRa.receive();
   server.on("/health", HTTP_GET, [](AsyncWebServerRequest *request) {
-    request->send(200, "application/json", "{\"ok\":true,\"bridge\":\"VANT_GCS\"}");
+    String json = "{\"ok\":";
+    json += loraReady ? "true" : "false";
+    json += ",\"bridge\":\"VANT_GCS\",\"drops\":";
+    json += String(droppedPackets);
+    json += "}";
+    request->send(200, "application/json", json);
   });
 
   server.onNotFound([](AsyncWebServerRequest *request) {

@@ -26,6 +26,8 @@ let config: RcWorkerConfig = {
   mode: 0,
 };
 
+let currentThrottle = 0;
+
 let timerId: ReturnType<typeof setTimeout> | null = null;
 let awaitingSnapshot = false;
 let nextTickAt = performance.now() + RC_TICK_MS;
@@ -95,7 +97,18 @@ self.onmessage = (event: MessageEvent<MainToWorkerMessage>) => {
       return;
     }
 
-    const buffer = buildRcPacket(message.gamepad.axes, config.mode, config.armed);
+    const THROTTLE_RATE_PER_TICK = 150;
+    const rawRate = -(message.gamepad.axes.leftY); // leftY is negative when UP
+    currentThrottle += rawRate * THROTTLE_RATE_PER_TICK;
+    if (currentThrottle < 0) currentThrottle = 0;
+    if (currentThrottle > 1000) currentThrottle = 1000;
+
+    const axesWithThrottle = {
+      ...message.gamepad.axes,
+      throttle: Math.trunc(currentThrottle)
+    };
+
+    const buffer = buildRcPacket(axesWithThrottle, config.mode, config.armed);
     const outbound: WorkerToMainMessage = { type: 'send-binary', buffer };
     (globalThis as unknown as WorkerScope).postMessage(outbound, [buffer]);
   }

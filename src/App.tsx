@@ -17,7 +17,8 @@ export default function App() {
   const [armed, setArmed] = useState(false);
   const [mode, setMode] = useState<FlightMode>(0);
 
-  const canSendToVant = isConnected && !isTelemetryLost;
+  // Permite enviar comandos sempre que houver conexão WS com o Bridge
+  const canSendToVant = isConnected;
   const telemetry = lastTelemetry;
   const connectedToVant = canSendToVant;
 
@@ -122,7 +123,7 @@ export default function App() {
                 </div>
 
                 <div className="mt-5 overflow-hidden rounded-xl border border-slate-800">
-                  <MapWidget lat={telemetry?.lat ?? -12.9714} lon={telemetry?.lon ?? -38.5104} />
+                  <MapWidget lat={telemetry?.lat ?? 0} lon={telemetry?.lon ?? 0} homeLat={telemetry?.lat ?? 0} homeLon={telemetry?.lon ?? 0} />
                 </div>
               </div>
 
@@ -152,7 +153,7 @@ export default function App() {
         <footer className="border-t border-slate-800/80 bg-slate-950/90 px-4 py-3 text-[10px] uppercase tracking-[0.35em] text-slate-500 lg:px-8">
           <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
             <div>WS {connectionLabel} • {new Date().toLocaleTimeString()} • {packetCount} packets</div>
-            <div>SSID VANT_GCS • Password admin • Binary little-endian control path</div>
+            <div>SSID VANT_GCS • Password vant#Sec24 • Binary little-endian control path</div>
           </div>
         </footer>
       </div>
