@@ -52,17 +52,18 @@ export function Dashboard({ isConnected, telemetryLost = false, telemetry, packe
     };
   }, [lastPacketTime]);
 
-  const isFailsafe = telemetry?.failsafe === 1;
+  const isFailsafe = telemetry?.failsafe && telemetry.failsafe > 0;
   const isArmed = telemetry?.armed ?? false;
   const isStale = timeSincePacket !== null && timeSincePacket > 2000;
   const statusLabel = useMemo(() => {
     if (!isConnected) return 'OFFLINE';
     if (telemetryLost) return 'TELEMETRY LOST';
-    if (isFailsafe) return 'FAILSAFE';
+    if (isFailsafe && telemetry?.failsafe === 2) return 'FAILSAFE (CRÍTICO)';
+    if (isFailsafe && telemetry?.failsafe === 1) return 'FAILSAFE (ALERTA)';
     if (isStale) return 'SEM SINAL';
     if (isArmed) return 'NORMAL';
     return 'NO TELEMETRY';
-  }, [isArmed, isConnected, isFailsafe, isStale, telemetryLost]);
+  }, [isArmed, isConnected, isFailsafe, isStale, telemetryLost, telemetry?.failsafe]);
 
   const latitude = telemetry?.lat ?? -12.9714;
   const longitude = telemetry?.lon ?? -38.5104;
@@ -74,6 +75,16 @@ export function Dashboard({ isConnected, telemetryLost = false, telemetry, packe
 
   return (
     <section className="space-y-6">
+      {(telemetryLost || (isFailsafe && telemetry?.failsafe === 2)) && (
+        <div className="animate-pulse rounded-xl border border-rose-500 bg-rose-500/20 p-4 text-center text-sm font-bold tracking-wider text-rose-200">
+          ⚠️ ALERTA CRÍTICO: FAILSAFE ATIVADO OU TELEMETRIA PERDIDA! RETORNO AUTOMÁTICO (RTH) EM ANDAMENTO.
+        </div>
+      )}
+      {!telemetryLost && isFailsafe && telemetry?.failsafe === 1 && (
+        <div className="rounded-xl border border-amber-500 bg-amber-500/20 p-4 text-center text-sm font-bold tracking-wider text-amber-200">
+          ⚠️ ALERTA: DEGRADAÇÃO DE LINK OU BATERIA FRACA DETECTADA.
+        </div>
+      )}
       <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
         <article className="rounded-xl border border-slate-800/80 bg-slate-900/40 p-6 backdrop-blur-md">
           <div className="flex items-start justify-between gap-4">
@@ -84,9 +95,21 @@ export function Dashboard({ isConnected, telemetryLost = false, telemetry, packe
                 Painel principal com telemetria binária, atitude do voo e consciência situacional do enlace.
               </p>
             </div>
-            <div className={`rounded-lg border px-3 py-2 text-right ${telemetryLost ? 'border-rose-500/30 bg-rose-500/10' : isConnected ? 'border-emerald-500/30 bg-emerald-500/10' : 'border-slate-700 bg-slate-950/60'}`}>
+            <div className={`rounded-lg border px-3 py-2 text-right ${
+              telemetryLost || (isFailsafe && telemetry?.failsafe === 2)
+                ? 'border-rose-500/30 bg-rose-500/10 text-rose-400'
+                : isFailsafe && telemetry?.failsafe === 1
+                ? 'border-amber-500/30 bg-amber-500/10 text-amber-400'
+                : isConnected
+                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
+                : 'border-slate-700 bg-slate-950/60 text-slate-500'
+            }`}>
               <div className="text-[10px] uppercase tracking-[0.3em] text-slate-500">MCU</div>
-              <div className={`mt-1 text-sm font-bold ${telemetryLost ? 'text-rose-400 animate-pulse' : isConnected ? 'text-emerald-400' : 'text-slate-500'}`}>{statusLabel}</div>
+              <div className={`mt-1 text-sm font-bold ${
+                telemetryLost || (isFailsafe && telemetry?.failsafe === 2)
+                  ? 'animate-pulse'
+                  : ''
+              }`}>{statusLabel}</div>
             </div>
           </div>
 
@@ -175,7 +198,15 @@ export function Dashboard({ isConnected, telemetryLost = false, telemetry, packe
                 <div className="text-[10px] font-bold uppercase tracking-[0.3em] text-slate-500">Flight Safety</div>
                 <div className="mt-1 text-lg font-semibold text-white">MCU State</div>
               </div>
-              <AlertTriangle className={`h-5 w-5 ${telemetryLost ? 'text-rose-400' : isFailsafe ? 'text-amber-400' : isStale ? 'text-rose-400' : 'text-emerald-400'}`} />
+              <AlertTriangle className={`h-5 w-5 ${
+                telemetryLost || (isFailsafe && telemetry?.failsafe === 2)
+                  ? 'text-rose-400 animate-pulse'
+                  : isFailsafe && telemetry?.failsafe === 1
+                  ? 'text-amber-400'
+                  : isStale
+                  ? 'text-rose-400'
+                  : 'text-emerald-400'
+              }`} />
             </div>
             <div className="mt-4 rounded-lg border border-slate-800 bg-slate-950/70 px-4 py-3">
               <div className="text-[10px] uppercase tracking-[0.3em] text-slate-500">Status</div>

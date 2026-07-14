@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { Armchair, Gamepad2, Power, RotateCcw, SatelliteDish, ShieldAlert } from 'lucide-react';
 
-import type { FlightMode, ParsedGamepadState } from '../lib/protocol';
+import type { FlightMode, ParsedGamepadState, TelemetryData } from '../lib/protocol';
 
 interface RCGamepadTabProps {
   armed: boolean;
@@ -11,6 +11,7 @@ interface RCGamepadTabProps {
   onArmChange: (armed: boolean) => void;
   onModeChange: (mode: FlightMode) => void;
   workerThrottle?: number;
+  telemetry?: TelemetryData | null;
 }
 
 const MODES: Array<{ value: FlightMode; label: string; accent: string }> = [
@@ -21,15 +22,15 @@ const MODES: Array<{ value: FlightMode; label: string; accent: string }> = [
   { value: 4, label: 'RTH', accent: 'text-rose-400' },
 ];
 
-function normalizeBarValue(value: number): number {
+const normalizeBarValue = (value: number): number => {
   return Math.max(0, Math.min(100, Math.round(((value + 1) / 2) * 100)));
-}
+};
 
-function formatThrottle(throttle: number): string {
+const formatThrottle = (throttle: number): string => {
   return `${Math.round(throttle)} / 1000`;
-}
+};
 
-export function RCGamepadTab({ armed, mode, isConnected, gamepad, onArmChange, onModeChange, workerThrottle }: RCGamepadTabProps) {
+export function RCGamepadTab({ armed, mode, isConnected, gamepad, onArmChange, onModeChange, workerThrottle, telemetry }: RCGamepadTabProps) {
   const previousButtonsRef = useRef(gamepad.buttons);
 
   useEffect(() => {

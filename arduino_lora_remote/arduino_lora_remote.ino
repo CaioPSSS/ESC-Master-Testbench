@@ -9,6 +9,33 @@
 #include <Servo.h>
 #include <Wire.h>
 #include <SoftwareSerial.h>
+struct __attribute__((packed)) PacketUplinkLoRa_t {
+    uint8_t  header;    // 0xBB
+    uint8_t  systemId;  // 0x42
+    int16_t  roll;      // -1000..+1000
+    int16_t  pitch;     // -1000..+1000
+    uint16_t throttle;  // 0..1000
+    uint8_t  mode;      // FlightMode cast
+    uint8_t  arm;       // 0 or 1
+};
+
+struct __attribute__((packed)) PacketTelemetryLoRa_t {
+    uint8_t  header;      // 0xAA
+    uint8_t  systemId;    // 0x42
+    int16_t  roll;        // Roll * 100
+    int16_t  pitch;       // Pitch * 100
+    int16_t  yaw;         // Yaw * 100
+    int16_t  altitude;    // Altitude in decimeters
+    uint16_t vbat;        // Voltage * 100
+    int32_t  lat;         // Latitude * 1e7
+    int32_t  lon;         // Longitude * 1e7
+    uint8_t  gps_sats;    // satellites
+    uint8_t  mode;        // FlightMode
+    uint8_t  armState;    // ArmState
+    uint8_t  failsafe;    // FailsafeState
+    int8_t   rssi;        // RSSI
+    uint16_t groundSpeed; // cm/s
+};
 
 // --- Pinos ---
 #define LORA_NSS   10
@@ -205,6 +232,7 @@ void setup() {
   if (!LoRa.begin(LORA_FREQ)) while (1);
   LoRa.setSpreadingFactor(7);
   LoRa.setSignalBandwidth(250E3);
+  LoRa.enableCrc();
   LoRa.setCodingRate4(5);
 
   esc.attach(escPin, 1000, 2000);
@@ -238,7 +266,7 @@ void loop() {
       filteredVoltage = currentVoltage;
       firstRead = false;
     } else {
-      float alpha = (throttle == 0) ? 0.05 : 0.0002;
+      float alpha = (throttle == 0) ? 0.05 : 0.004; // Constante de tempo de 5 segundos
       filteredVoltage = (filteredVoltage * (1.0 - alpha)) + (currentVoltage * alpha);
     }
     lastVoltageReadTime = millis();
@@ -279,24 +307,25 @@ void loop() {
       bmp_altitude = 44330.0 * (1.0 - pow(press / base_pressure, 0.1903));
     }
 
-    String status = failsafeActive ? "FAILSAFE" : (isBatteryLow ? "ERROR_BATTERY" : "OK");
-    
-    // T:V=8.4,P=100,S=OK,AR=-50,PIT=12.1,ROL=-5.2,ALT=120.1,LAT=-12.9714,LON=-38.5104
-    String telemetry = "T:V=" + String(filteredVoltage, 2) + 
-                       ",P=" + String(constrain(map(filteredVoltage * 100, 600, 840, 0, 100), 0, 100)) + 
-                       ",S=" + status + 
-                       ",AR=" + String(lastCmdRssi) + 
-                       ",PIT=" + String(pitch_mpu, 1) + 
-                       ",ROL=" + String(roll_mpu, 1) + 
-                       ",ALT=" + String(bmp_altitude, 1) + 
-                       ",LAT=" + String(gps_lat, 6) + 
-                       ",LON=" + String(gps_lon, 6) +
-                       ",SAT=" + String(gps_satellites) +
-                       ",FIX=" + String(gps_fix_quality) +
-                       ",CRS=" + String(gps_course, 1);
+    PacketTelemetryLoRa_t telemetryPkt;
+    telemetryPkt.header = 0xAA;
+    telemetryPkt.systemId = 0x42;
+    telemetryPkt.roll = (int16_t)(roll_mpu * 100.0f);
+    telemetryPkt.pitch = (int16_t)(pitch_mpu * 100.0f);
+    telemetryPkt.yaw = (int16_t)(gps_course * 100.0f);
+    telemetryPkt.altitude = (int16_t)(bmp_altitude * 10.0f);
+    telemetryPkt.vbat = (uint16_t)(filteredVoltage * 100.0f);
+    telemetryPkt.lat = (int32_t)(gps_lat * 1e7);
+    telemetryPkt.lon = (int32_t)(gps_lon * 1e7);
+    telemetryPkt.gps_sats = (uint8_t)gps_satellites;
+    telemetryPkt.mode = 0; // MANUAL
+    telemetryPkt.armState = failsafeActive ? 0 : 1;
+    telemetryPkt.failsafe = failsafeActive ? 2 : (isBatteryLow ? 1 : 0);
+    telemetryPkt.rssi = (int8_t)lastCmdRssi;
+    telemetryPkt.groundSpeed = 0;
 
     LoRa.beginPacket();
-    LoRa.print(telemetry);
+    LoRa.write((uint8_t*)&telemetryPkt, sizeof(telemetryPkt));
     LoRa.endPacket();
     LoRa.receive();
 
@@ -305,37 +334,27 @@ void loop() {
 
   int packetSize = LoRa.parsePacket();
   if (packetSize) {
-    String input = "";
-    while (LoRa.available()) input += (char)LoRa.read();
-    input.trim();
-    lastCmdRssi = LoRa.packetRssi();
-    lastCommandTime = millis();
+    if (packetSize >= sizeof(PacketUplinkLoRa_t)) {
+      PacketUplinkLoRa_t cmdPkt;
+      LoRa.readBytes((uint8_t*)&cmdPkt, sizeof(PacketUplinkLoRa_t));
+      if (cmdPkt.header == 0xBB && cmdPkt.systemId == 0x42) {
+        lastCmdRssi = LoRa.packetRssi();
+        lastCommandTime = millis();
 
-    if (input == "CALIBRATE") {
-      LoRa.beginPacket(); LoRa.print("T:V=0.00,P=0,S=CALIBRATING"); LoRa.endPacket();
-      esc.writeMicroseconds(2000);
-      delay(8000);
-      esc.writeMicroseconds(1000);
-      LoRa.beginPacket(); LoRa.print("T:V=0.00,P=0,S=CAL_DONE"); LoRa.endPacket();
-    } else {
-      int pT = 0, pP = 0, pR = 0;
-      if (sscanf(input.c_str(), "%d,%d,%d", &pT, &pP, &pR) == 3) {
-        throttle = constrain(pT, 0, 100);
-        pitch_cmd = constrain(pP, -100, 100);
-        roll_cmd = constrain(pR, -100, 100);
-      } else {
-        throttle = constrain(input.toInt(), 0, 100);
-        pitch_cmd = 0; roll_cmd = 0;
+        throttle = constrain(map(cmdPkt.throttle, 0, 1000, 0, 100), 0, 100);
+        pitch_cmd = constrain(map(cmdPkt.pitch, -1000, 1000, -100, 100), -100, 100);
+        roll_cmd = constrain(map(cmdPkt.roll, -1000, 1000, -100, 100), -100, 100);
+
+        if (isBatteryLow) throttle = 0;
+
+        int pwmValue = (throttle > 0) ? map(throttle, 1, 100, 1040, 2000) : 1000;
+        esc.writeMicroseconds(pwmValue);
+
+        int leftAngle = LEFT_CENTER + map(pitch_cmd, -100, 100, -45, 45) + map(roll_cmd, -100, 100, 45, -45);
+        int rightAngle = RIGHT_CENTER + map(pitch_cmd, -100, 100, 45, -45) + map(roll_cmd, -100, 100, 45, -45);
+        leftElevon.write(constrain(leftAngle, LEFT_MIN, LEFT_MAX));
+        rightElevon.write(constrain(rightAngle, RIGHT_MIN, RIGHT_MAX));
       }
-      if (isBatteryLow) throttle = 0;
-
-      int pwmValue = (throttle > 0) ? map(throttle, 1, 100, 1040, 2000) : 1000;
-      esc.writeMicroseconds(pwmValue);
-
-      int leftAngle = LEFT_CENTER + map(pitch_cmd, -100, 100, -45, 45) + map(roll_cmd, -100, 100, 45, -45);
-      int rightAngle = RIGHT_CENTER + map(pitch_cmd, -100, 100, 45, -45) + map(roll_cmd, -100, 100, 45, -45);
-      leftElevon.write(constrain(leftAngle, LEFT_MIN, LEFT_MAX));
-      rightElevon.write(constrain(rightAngle, RIGHT_MIN, RIGHT_MAX));
     }
   }
 }

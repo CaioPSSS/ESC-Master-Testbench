@@ -142,7 +142,7 @@ void setupLoRa() {
   // RF config — MUST match FlightControl (125kHz, SF7, CR4/5)
   LoRa.setTxPower(17);
   LoRa.setSpreadingFactor(7);
-  LoRa.setSignalBandwidth(125E3);  // Match FlightControl BW
+  LoRa.setSignalBandwidth(250E3);  // Match FlightControl BW
   LoRa.setCodingRate4(5);
   LoRa.enableCrc();                // Match FlightControl CRC
   LoRa.receive();

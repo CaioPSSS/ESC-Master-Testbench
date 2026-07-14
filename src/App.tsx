@@ -16,6 +16,20 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'map' | 'rc' | 'tuning'>('dashboard');
   const [armed, setArmed] = useState(false);
   const [mode, setMode] = useState<FlightMode>(0);
+  const [lastInteractionTime, setLastInteractionTime] = useState<number>(0);
+  const [isOverridden, setIsOverridden] = useState(false);
+
+  const handleArmChange = (newArmed: boolean) => {
+    setArmed(newArmed);
+    setIsOverridden(true);
+    setLastInteractionTime(Date.now());
+  };
+
+  const handleModeChange = (newMode: FlightMode) => {
+    setMode(newMode);
+    setIsOverridden(true);
+    setLastInteractionTime(Date.now());
+  };
 
   const canSendToVant = isConnected;
   const telemetry = lastTelemetry;
@@ -38,9 +52,19 @@ export default function App() {
   });
 
   useEffect(() => {
-    setArmed(lastTelemetry?.armed ?? false);
-    setMode(lastTelemetry?.mode ?? 0);
-  }, [lastTelemetry?.armed, lastTelemetry?.mode]);
+    if (!isOverridden) return;
+    const timer = setTimeout(() => {
+      setIsOverridden(false);
+    }, 2500); // 2.5s lockout
+    return () => clearTimeout(timer);
+  }, [lastInteractionTime, isOverridden]);
+
+  useEffect(() => {
+    if (!isOverridden && lastTelemetry) {
+      setArmed(lastTelemetry.armed);
+      setMode(lastTelemetry.mode);
+    }
+  }, [lastTelemetry, isOverridden]);
 
   const connectionLabel = useMemo(() => {
     if (status === 'connected') return 'CONNECTED';
@@ -149,9 +173,10 @@ export default function App() {
               mode={mode}
               isConnected={connectedToVant}
               gamepad={gamepad}
-              onArmChange={setArmed}
-              onModeChange={setMode}
+              onArmChange={handleArmChange}
+              onModeChange={handleModeChange}
               workerThrottle={workerThrottle}
+              telemetry={telemetry}
             />
           )}
 

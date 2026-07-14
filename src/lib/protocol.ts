@@ -55,33 +55,35 @@ export interface ParsedGamepadState {
 export const DEFAULT_WS_URL = 'ws://192.168.4.1/ws';
 
 export const RC_PACKET_HEADER = 0xBB;
-export const RC_PACKET_LENGTH = 9;
+export const RC_PACKET_LENGTH = 10;
 export const RC_PACKET_OFFSETS = {
   header: 0,
-  roll: 1,
-  pitch: 3,
-  throttle: 5,
-  mode: 7,
-  armed: 8,
+  systemId: 1,
+  roll: 2,
+  pitch: 4,
+  throttle: 6,
+  mode: 8,
+  armed: 9,
 } as const;
 
 export const TELEMETRY_PACKET_HEADER = 0xAA;
-export const TELEMETRY_PACKET_LENGTH = 26;
+export const TELEMETRY_PACKET_LENGTH = 27;
 export const TELEMETRY_OFFSETS = {
   header: 0,
-  roll: 1,
-  pitch: 3,
-  yaw: 5,
-  altitude: 7,
-  battery: 9,
-  lat: 11,
-  lon: 15,
-  sats: 19,
-  mode: 20,
-  armed: 21,
-  failsafe: 22,
-  rssi: 23,
-  groundSpeed: 24,
+  systemId: 1,
+  roll: 2,
+  pitch: 4,
+  yaw: 6,
+  altitude: 8,
+  battery: 10,
+  lat: 12,
+  lon: 16,
+  sats: 20,
+  mode: 21,
+  armed: 22,
+  failsafe: 23,
+  rssi: 24,
+  groundSpeed: 25,
 } as const;
 
 export const PARAMETER_NAMES = [
@@ -113,6 +115,10 @@ export function parseTelemetry(buffer: ArrayBuffer): TelemetryData | null {
     return null;
   }
 
+  if (view.getUint8(TELEMETRY_OFFSETS.systemId) !== 0x42) {
+    return null;
+  }
+
   return {
     roll: view.getInt16(TELEMETRY_OFFSETS.roll, true) / 100,
     pitch: view.getInt16(TELEMETRY_OFFSETS.pitch, true) / 100,
@@ -135,6 +141,7 @@ export function buildRcPacket(axes: Pick<GamepadAxes, 'roll' | 'pitch' | 'thrott
   const view = new DataView(buffer);
 
   view.setUint8(RC_PACKET_OFFSETS.header, RC_PACKET_HEADER);
+  view.setUint8(RC_PACKET_OFFSETS.systemId, 0x42);
   view.setInt16(RC_PACKET_OFFSETS.roll, Math.trunc(clamp(axes.roll, -1, 1) * 1000), true);
   view.setInt16(RC_PACKET_OFFSETS.pitch, Math.trunc(clamp(axes.pitch, -1, 1) * 1000), true);
   view.setUint16(RC_PACKET_OFFSETS.throttle, clamp(Math.trunc(axes.throttle), 0, 1000), true);
@@ -145,26 +152,28 @@ export function buildRcPacket(axes: Pick<GamepadAxes, 'roll' | 'pitch' | 'thrott
 }
 
 export function buildMissionPacket(index: number, lat: number, lon: number, altDecimeters: number, speedCentimeters: number): ArrayBuffer {
-  const buffer = new ArrayBuffer(14);
+  const buffer = new ArrayBuffer(15);
   const view = new DataView(buffer);
 
   view.setUint8(0, 0xCC);
-  view.setUint8(1, clamp(Math.trunc(index), 0, 255));
-  view.setInt32(2, Math.trunc(lat * 1e7), true);
-  view.setInt32(6, Math.trunc(lon * 1e7), true);
-  view.setInt16(10, Math.trunc(altDecimeters), true);
-  view.setUint16(12, clamp(Math.trunc(speedCentimeters), 0, 65535), true);
+  view.setUint8(1, 0x42);
+  view.setUint8(2, clamp(Math.trunc(index), 0, 255));
+  view.setInt32(3, Math.trunc(lat * 1e7), true);
+  view.setInt32(7, Math.trunc(lon * 1e7), true);
+  view.setInt16(11, Math.trunc(altDecimeters), true);
+  view.setUint16(13, clamp(Math.trunc(speedCentimeters), 0, 65535), true);
 
   return buffer;
 }
 
 export function buildTuningPacket(paramId: number, value: number): ArrayBuffer {
-  const buffer = new ArrayBuffer(6);
+  const buffer = new ArrayBuffer(7);
   const view = new DataView(buffer);
 
   view.setUint8(0, 0xDD);
-  view.setUint8(1, clamp(Math.trunc(paramId), 0, 255));
-  view.setFloat32(2, Number.isFinite(value) ? value : 0, true);
+  view.setUint8(1, 0x42);
+  view.setUint8(2, clamp(Math.trunc(paramId), 0, 255));
+  view.setFloat32(3, Number.isFinite(value) ? value : 0, true);
 
   return buffer;
 }
