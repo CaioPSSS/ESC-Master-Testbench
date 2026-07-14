@@ -11,7 +11,25 @@ import { RCGamepadTab } from './components/RCGamepadTab';
 import { TuningParamsTab } from './components/TuningParamsTab';
 
 export default function App() {
-  const { connect, disconnect, error, isConnected, isTelemetryLost, lastTelemetry, lastPacketTime, packetCount, sendBinary, status, url } = useWebSocket();
+  const {
+    connect,
+    disconnect,
+    error,
+    isConnected,
+    isTelemetryLost,
+    lastTelemetry,
+    lastPacketTime,
+    packetCount,
+    sendBinary,
+    status,
+    url,
+    uploadMission,
+    clearMission,
+    syncStatus,
+    syncProgress,
+    syncError,
+    isSyncing,
+  } = useWebSocket();
   const gamepad = useGamepad();
   const [activeTab, setActiveTab] = useState<'dashboard' | 'map' | 'rc' | 'tuning'>('dashboard');
   const [armed, setArmed] = useState(false);
@@ -142,29 +160,21 @@ export default function App() {
           {activeTab === 'dashboard' && <Dashboard isConnected={connectedToVant} telemetryLost={isTelemetryLost} telemetry={telemetry} packetCount={packetCount} lastPacketTime={lastPacketTime} />}
 
           {activeTab === 'map' && (
-            <section className="grid gap-6 lg:grid-cols-[1fr_0.6fr]">
-              <div className="rounded-xl border border-slate-800/80 bg-slate-900/40 p-6 backdrop-blur-md">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <div className="text-[10px] font-bold uppercase tracking-[0.35em] text-slate-500">Live Map</div>
-                    <h2 className="mt-1 text-2xl font-semibold text-white">MapWidget</h2>
-                    <p className="mt-2 text-sm text-slate-400">Posição, trilha e leitura de GPS em tempo real.</p>
-                  </div>
-                  <MapPinned className="h-5 w-5 text-emerald-400" />
-                </div>
-
-                <div className="mt-5 overflow-hidden rounded-xl border border-slate-800">
-                  <MapWidget lat={telemetry?.lat ?? 0} lon={telemetry?.lon ?? 0} homeLat={homePos?.lat ?? telemetry?.lat ?? 0} homeLon={homePos?.lon ?? telemetry?.lon ?? 0} />
-                </div>
-              </div>
-
-              <div className="space-y-4">
-                <InfoPanel title="GPS Snapshot" value={`${(telemetry?.lat ?? 0).toFixed(6)}, ${(telemetry?.lon ?? 0).toFixed(6)}`} />
-                <InfoPanel title="Altitude" value={`${(telemetry?.altitude ?? 0).toFixed(1)} m`} />
-                <InfoPanel title="Ground Speed" value={`${(telemetry?.groundSpeed ?? 0).toFixed(2)} m/s`} />
-                <InfoPanel title="Satellites" value={`${telemetry?.sats ?? 0}`} />
-              </div>
-            </section>
+            <MapWidget
+              lat={telemetry?.lat ?? 0}
+              lon={telemetry?.lon ?? 0}
+              homeLat={homePos?.lat ?? telemetry?.lat ?? 0}
+              homeLon={homePos?.lon ?? telemetry?.lon ?? 0}
+              telemetry={telemetry}
+              isConnected={isConnected}
+              isTelemetryLost={isTelemetryLost}
+              uploadMission={uploadMission}
+              clearMission={clearMission}
+              syncStatus={syncStatus}
+              syncProgress={syncProgress}
+              syncError={syncError}
+              isSyncing={isSyncing}
+            />
           )}
 
           {activeTab === 'rc' && (

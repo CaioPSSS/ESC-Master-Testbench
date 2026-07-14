@@ -151,8 +151,16 @@ export function buildRcPacket(axes: Pick<GamepadAxes, 'roll' | 'pitch' | 'thrott
   return buffer;
 }
 
-export function buildMissionPacket(index: number, lat: number, lon: number, altDecimeters: number, speedCentimeters: number): ArrayBuffer {
-  const buffer = new ArrayBuffer(15);
+export function buildMissionPacket(
+  index: number,
+  lat: number,
+  lon: number,
+  altDecimeters: number,
+  speedCentimeters: number,
+  cmd: number,
+  cmdVal: number
+): ArrayBuffer {
+  const buffer = new ArrayBuffer(18);
   const view = new DataView(buffer);
 
   view.setUint8(0, 0xCC);
@@ -162,6 +170,8 @@ export function buildMissionPacket(index: number, lat: number, lon: number, altD
   view.setInt32(7, Math.trunc(lon * 1e7), true);
   view.setInt16(11, Math.trunc(altDecimeters), true);
   view.setUint16(13, clamp(Math.trunc(speedCentimeters), 0, 65535), true);
+  view.setUint8(15, clamp(Math.trunc(cmd), 0, 255));
+  view.setUint16(16, clamp(Math.trunc(cmdVal), 0, 65535), true);
 
   return buffer;
 }
@@ -176,4 +186,42 @@ export function buildTuningPacket(paramId: number, value: number): ArrayBuffer {
   view.setFloat32(3, Number.isFinite(value) ? value : 0, true);
 
   return buffer;
+}
+
+export interface MissionControlData {
+  cmd: number;
+  data1: number;
+  checksum: number;
+}
+
+export function buildMissionControlPacket(cmd: number, data1: number, checksum: number): ArrayBuffer {
+  const buffer = new ArrayBuffer(9);
+  const view = new DataView(buffer);
+
+  view.setUint8(0, 0xCE);
+  view.setUint8(1, 0x42);
+  view.setUint8(2, clamp(Math.trunc(cmd), 0, 255));
+  view.setUint8(3, clamp(Math.trunc(data1), 0, 255));
+  view.setUint32(4, checksum, true);
+  view.setUint8(8, 0); // Padding/unused to ensure 9-byte layout
+
+  return buffer;
+}
+
+export function parseMissionControl(buffer: ArrayBuffer): MissionControlData | null {
+  const view = new DataView(buffer);
+
+  if (view.byteLength < 9 || view.getUint8(0) !== 0xCE) {
+    return null;
+  }
+
+  if (view.getUint8(1) !== 0x42) {
+    return null;
+  }
+
+  return {
+    cmd: view.getUint8(2),
+    data1: view.getUint8(3),
+    checksum: view.getUint32(4, true),
+  };
 }

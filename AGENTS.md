@@ -61,17 +61,17 @@ The protocol is strict little-endian binary. Use `DataView` for all packing and 
 Keep packet offsets centralized in `src/lib/protocol.ts`; do not hardcode byte offsets in components or hooks.
 
 ### Uplink
-- `0xBB` RC packet, 9 bytes total
-     - `[u8 header] [i16 roll] [i16 pitch] [u16 throttle] [u8 mode] [u8 arm]`
+- `0xBB` RC packet, 10 bytes total
+     - `[u8 header] [u8 systemId] [i16 roll] [i16 pitch] [u16 throttle] [u8 mode] [u8 arm]`
      - Gamepad axes are normalized from `-1.0` to `1.0` and multiplied by `1000` with `Math.trunc()` before packing.
-- `0xCC` mission upload, 14 bytes total
-     - `[u8 header] [u8 index] [i32 lat*1e7] [i32 lon*1e7] [i16 alt_dm] [u16 speed_cms]`
-- `0xDD` tuning packet, 6 bytes total
-     - `[u8 header] [u8 paramId] [f32 value]`
+- `0xCC` mission upload, 15 bytes total
+     - `[u8 header] [u8 systemId] [u8 index] [i32 lat*1e7] [i32 lon*1e7] [i16 alt_dm] [u16 speed_cms]`
+- `0xDD` tuning packet, 7 bytes total
+     - `[u8 header] [u8 systemId] [u8 paramId] [f32 value]`
 
 ### Downlink
-- `0xAA` telemetry packet, 26 bytes total
-     - Roll, pitch, yaw, altitude, battery, lat, lon, sats, mode, armed, failsafe, RSSI, ground speed
+- `0xAA` telemetry packet, 27 bytes total
+     - `[u8 header] [u8 systemId] [i16 roll*100] [i16 pitch*100] [i16 yaw*100] [i16 alt_dm] [u16 vbat*100] [i32 lat*1e7] [i32 lon*1e7] [u8 sats] [u8 mode] [u8 arm] [u8 failsafe] [i8 rssi] [u16 groundSpeed]`
 
 ## Frontend Rules
 - Keep the UI tabbed. The current tabs are `Dashboard`, `Map Widget`, `RC & Gamepad`, and `Tuning & Params`.
@@ -79,17 +79,20 @@ Keep packet offsets centralized in `src/lib/protocol.ts`; do not hardcode byte o
 - Do not reintroduce `useBluetooth.ts`, BLE UART UUIDs, or text command strings.
 - Do not add software trims for pitch or roll in the UI. The Arduino owns elevon centering and limits.
 - Keep the dashboard as a read-only telemetry surface. Control actions belong in the RC/Gamepad tab.
-- Keep the dark HUD look and the glass panels. Do not switch to a flat or light UI.
+- Keep the dark HUD look and the glass panels. Do not switch to a light UI.
 - Use monospace presentation for packet values, IDs, voltages, coordinates, and telemetry fields.
+- Ensure that the failsafe state is clearly warning or critical using prominent blinking banners at the top of the GCS dashboard.
+- Protect operator settings using the 2.5-second UI override block on arm/mode switches to prevent stale telemetry packet overrides.
 
 ## ESP32 Bridge Rules
-- The ESP32 must stay in **AP mode** with SSID `VANT_GCS` and password `admin` unless the task explicitly says otherwise.
+- The ESP32 must stay in **AP mode** with SSID `VANT_GCS` and password `vant#Sec24`.
 - The WebSocket endpoint is `/ws`.
 - The ESP32 bridge must remain transparent: no parsing of control or telemetry fields, only byte forwarding.
 - Use `ESPAsyncWebServer` and `AsyncTCP` with FreeRTOS tasks/queues for the split between network and radio work.
 - Prefer DIO0 hardware interrupts plus a semaphore over polling for LoRa RX.
 - When enqueueing outbound radio packets, use a short bounded wait and track drops explicitly rather than silently discarding packets.
 - Keep LoRa on `#include <LoRa.h>` from Sandeep Mistry.
+- Set physical LoRa parameters: Spreading Factor to 7, Bandwidth to **250 kHz** (`250E3`), Coding Rate to 4/5, and enable hardware CRC check.
 - Do not raise BLE power or reintroduce BLE on the ESP32 bridge.
 
 ## Arduino Flight Controller Rules
@@ -99,7 +102,9 @@ Keep packet offsets centralized in `src/lib/protocol.ts`; do not hardcode byte o
 - D9 remains reserved for LoRa NRESET.
 - Keep the elevon servo pins at **D3** and **D5**.
 - Do not add heavy libraries such as `TinyGPS++` or `Adafruit_BMP280`; use bare-metal parsing and lightweight I2C.
-- Preserve the existing anti-sag EMA structure and alpha values unless the task explicitly asks for changes.
+- Communication with GCS bridge/UAV is completely binary (never ASCII), using structures packed matching `SharedTypes.h` with `systemId = 0x42` verification.
+- Scale joystick ranges correctly by constraint mapping from GCS scale ($0..1000$) to actuator scale ($0..100$) before setting outputs.
+- Calibrate battery sensor with digital low-pass filtering and alpha constant optimized to **0.004** (response time ~5s) to avoid slow reading lag.
 - Preserve the existing failsafe timing values unless explicitly requested.
 
 ## Safety and Behavior Rules
